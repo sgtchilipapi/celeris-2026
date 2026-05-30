@@ -18,14 +18,14 @@ This document turns the implementation plan into ordered work orders that an age
 
 ## Sequence Summary
 
-| WO | Title | Primary Outcome | Depends On |
-| --- | --- | --- | --- |
-| `FS-00` | Workspace Bootstrap | Monorepo skeleton, Express, Next.js, Prisma, shared packages, test harness | none |
-| `FS-01` | Developer App Setup | Developer auth, app creation, sponsor-wallet provisioning, program registration, action config | `FS-00` |
-| `FS-02` | Hosted Player Auth And zkLogin Identity | Real Google login, zkLogin wallet identity, player session, browser SDK auth flow | `FS-00`, `FS-01` |
-| `FS-03` | Credits And Mock Checkout | Catalog, balance, checkout flow, persistent credit ledger | `FS-01`, `FS-02` |
-| `FS-04` | Sponsored Say Hello And Feed | Move package finalization, canonical tx builder, sponsor-sign flow, completion, app-wide feed | `FS-01`, `FS-02`, `FS-03` |
-| `FS-05` | SDK Consumer Hardening And Walkthrough | Public SDK integration proof, walkthrough, regression suite, final polish | `FS-00`, `FS-01`, `FS-02`, `FS-03`, `FS-04` |
+| WO | Status | Title | Primary Outcome | Depends On |
+| --- | --- | --- | --- | --- |
+| `FS-00` | complete | Workspace Bootstrap | Monorepo skeleton, Express, Next.js, Prisma, shared packages, test harness | none |
+| `FS-01` | pending | Developer App Setup | Developer auth, app creation, sponsor-wallet provisioning, program registration, action config | `FS-00` |
+| `FS-02` | pending | Hosted Player Auth And zkLogin Identity | Real Google login, zkLogin wallet identity, player session, browser SDK auth flow | `FS-00`, `FS-01` |
+| `FS-03` | pending | Credits And Mock Checkout | Catalog, balance, checkout flow, persistent credit ledger | `FS-01`, `FS-02` |
+| `FS-04` | pending | Sponsored Say Hello And Feed | Move package finalization, canonical tx builder, sponsor-sign flow, completion, app-wide feed | `FS-01`, `FS-02`, `FS-03` |
+| `FS-05` | pending | SDK Consumer Hardening And Walkthrough | Public SDK integration proof, walkthrough, regression suite, final polish | `FS-00`, `FS-01`, `FS-02`, `FS-03`, `FS-04` |
 
 ## Dependency Map
 
