@@ -6,3 +6,87 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+model DeveloperAccount {
+  id           String             @id @default(cuid())
+  email        String             @unique
+  passwordHash String
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  sessions     DeveloperSession[]
+  apps         App[]
+}
+
+model DeveloperSession {
+  id        String           @id @default(cuid())
+  developerId String
+  tokenHash String           @unique
+  expiresAt DateTime
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  developer DeveloperAccount @relation(fields: [developerId], references: [id], onDelete: Cascade)
+
+  @@index([developerId])
+}
+
+model App {
+  id               String             @id @default(cuid())
+  developerId      String
+  name             String
+  slug             String             @unique
+  allowedChainId   String
+  authProvider     String
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  developer        DeveloperAccount   @relation(fields: [developerId], references: [id], onDelete: Cascade)
+  actions          ManagedAction[]
+  sponsorWallets   SponsorWallet[]
+  registeredPrograms RegisteredProgram[]
+
+  @@index([developerId])
+}
+
+model ManagedAction {
+  id           String   @id @default(cuid())
+  appId        String
+  actionType   String
+  priceCredits Int
+  isEnabled    Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  app          App      @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@unique([appId, actionType])
+  @@index([appId])
+}
+
+model SponsorWallet {
+  id              String   @id @default(cuid())
+  appId           String
+  chainFamily     String
+  network         String
+  address         String
+  encryptedSecret String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  app             App      @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@unique([appId, chainFamily, network])
+  @@index([appId])
+}
+
+model RegisteredProgram {
+  id                   String   @id @default(cuid())
+  appId                String
+  chainFamily          String
+  network              String
+  packageId            String
+  appStateObjectId     String
+  authorityCapObjectId String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  app                  App      @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@unique([appId, chainFamily, network])
+  @@index([appId])
+}

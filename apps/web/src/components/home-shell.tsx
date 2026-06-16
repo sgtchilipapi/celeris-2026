@@ -44,6 +44,9 @@ export function HomeShell({ mode, config }: HomeShellProps) {
           <li>
             <a href="/hosted-auth">Hosted auth shell</a>
           </li>
+          <li>
+            <a href="/setup">Developer setup console</a>
+          </li>
         </ul>
       </section>
     </main>

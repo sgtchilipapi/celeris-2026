@@ -19,7 +19,7 @@ body {
 }
 
 body {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: Inter, "Segoe UI", sans-serif;
   color: var(--ink);
   background:
     radial-gradient(circle at top, rgba(204, 109, 44, 0.18), transparent 40%),
@@ -105,5 +105,240 @@ a {
 @media (max-width: 640px) {
   .shell {
     padding: 1.25rem 1rem 2rem;
+  }
+}
+
+.workspace {
+  max-width: 88rem;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 3rem;
+  display: grid;
+  gap: 1.5rem;
+}
+
+.workspace-header,
+.workspace-band {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 1.25rem;
+}
+
+.workspace-header {
+  display: grid;
+  gap: 1rem;
+}
+
+.workspace-kicker {
+  margin: 0 0 0.5rem;
+  color: var(--accent);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+}
+
+.workspace-header h1,
+.workspace-band h2,
+.workspace-band h3 {
+  margin: 0;
+}
+
+.workspace-copy,
+.band-header p,
+.status-band p,
+.empty-state {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.workspace-grid {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr);
+}
+
+.band-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.runtime-grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  margin: 0;
+}
+
+.runtime-grid div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.runtime-grid dt {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.runtime-grid dd {
+  margin: 0;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.segmented-control {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.7);
+  margin-bottom: 1rem;
+}
+
+.segment,
+.button,
+.list-row {
+  min-height: 2.5rem;
+  border-radius: 0.45rem;
+  border: 1px solid transparent;
+  font: inherit;
+}
+
+.segment {
+  padding: 0 0.9rem;
+  background: transparent;
+}
+
+.segment.active {
+  background: #17221f;
+  color: #fff;
+}
+
+.form-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.form-grid.compact {
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  align-items: end;
+}
+
+.form-grid h3 {
+  grid-column: 1 / -1;
+}
+
+.form-grid label {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.form-grid span {
+  font-size: 0.9rem;
+}
+
+.form-grid input[type="email"],
+.form-grid input[type="number"],
+.form-grid input[type="password"],
+.form-grid input[type="text"] {
+  min-height: 2.75rem;
+  border-radius: 0.45rem;
+  border: 1px solid var(--border);
+  padding: 0.65rem 0.8rem;
+  font: inherit;
+  background: #fff;
+  color: var(--ink);
+}
+
+.button {
+  padding: 0 0.95rem;
+  background: #17221f;
+  color: #fff;
+  cursor: pointer;
+}
+
+.button.secondary {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--ink);
+}
+
+.button:disabled,
+.segment:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.list-stack {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.list-row {
+  padding: 0.7rem 0.85rem;
+  text-align: left;
+  background: #fff;
+  border-color: var(--border);
+  display: grid;
+  gap: 0.2rem;
+}
+
+.list-row.selected {
+  border-color: var(--accent);
+}
+
+.list-row small {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.75rem;
+}
+
+.snippet-block {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.snippet-block pre {
+  margin: 0.75rem 0 0;
+  padding: 0.9rem;
+  border-radius: 0.45rem;
+  border: 1px solid var(--border);
+  background: rgba(23, 34, 31, 0.04);
+  overflow-x: auto;
+}
+
+.status-band {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.error-text {
+  margin: 0;
+  color: #a52b2b;
+  max-width: 28rem;
+}
+
+@media (max-width: 840px) {
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .band-header,
+  .status-band {
+    flex-direction: column;
   }
 }

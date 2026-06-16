@@ -1,5 +1,6 @@
 import type { ErrorRequestHandler } from "express";
 import { ZodError } from "zod";
+import { HttpError } from "../lib/http-error";
 import { logger } from "../lib/logger";
 
 export const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
@@ -15,6 +16,22 @@ export const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
       error: "Validation failed",
       requestId,
       issues: error.issues
+    });
+    return;
+  }
+
+  if (error instanceof HttpError) {
+    logger.error("request.http_error", {
+      requestId,
+      statusCode: error.statusCode,
+      error: error.message,
+      details: error.details
+    });
+
+    res.status(error.statusCode).json({
+      error: error.message,
+      requestId,
+      details: error.details
     });
     return;
   }

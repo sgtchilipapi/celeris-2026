@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: celeris-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-celeris}
+      POSTGRES_USER: ${POSTGRES_USER:-celeris}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-celeris}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-celeris} -d ${POSTGRES_DB:-celeris}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    volumes:
+      - celeris_dev_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  celeris_dev_postgres_data:
