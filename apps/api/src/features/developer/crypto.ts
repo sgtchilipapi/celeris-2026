@@ -1,4 +1,4 @@
-import { createCipheriv, createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 
 const scrypt = promisify(scryptCallback);
@@ -43,4 +43,15 @@ export function encryptSecret(plaintext: string, secret: string) {
   const authTag = cipher.getAuthTag();
 
   return Buffer.concat([iv, authTag, ciphertext]).toString("base64");
+}
+
+export function decryptSecret(encrypted: string, secret: string) {
+  const payload = Buffer.from(encrypted, "base64");
+  const iv = payload.subarray(0, 12);
+  const authTag = payload.subarray(12, 28);
+  const ciphertext = payload.subarray(28);
+  const key = createHash("sha256").update(secret).digest();
+  const decipher = createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(authTag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
 }

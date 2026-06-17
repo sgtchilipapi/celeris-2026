@@ -162,6 +162,7 @@ describe("Celeris browser SDK auth", () => {
             catalog: {
               appId: "app_123",
               chainId: "sui:testnet",
+              registeredProgram: null,
               actions: [
                 {
                   actionType: "say_hello",
@@ -329,6 +330,113 @@ describe("Celeris browser SDK auth", () => {
       balance: {
         availableCredits: 50
       }
+    });
+  });
+
+  it("builds say_hello through sponsorship and returns the completed transaction", async () => {
+    window.sessionStorage.setItem("celeris.auth.session.app_123", JSON.stringify(createSession()));
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ session: createSession() }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            catalog: {
+              appId: "app_123",
+              chainId: "sui:testnet",
+              registeredProgram: {
+                chainFamily: "sui",
+                network: "testnet",
+                packageId: "0x2",
+                appStateObjectId: "0x123",
+                authorityCapObjectId: "0x456",
+                createdAt: "2026-06-30T00:00:00.000Z",
+                updatedAt: "2026-06-30T00:00:00.000Z"
+              },
+              actions: [
+                {
+                  actionType: "say_hello",
+                  priceCredits: 5,
+                  isEnabled: true
+                }
+              ]
+            }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ session: createSession() }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            sponsorship: {
+              reservationId: "reservation_123",
+              transactionBytes: "tx-bytes",
+              sponsorSignature: "sponsor-signature",
+              sponsorAddress: createSession().user.walletAddress,
+              expiresAt: "2026-06-30T00:00:00.000Z",
+              username: "Ada",
+              message: "Ada says Hello Celeris!"
+            },
+            balance: {
+              appId: "app_123",
+              walletAddress: createSession().user.walletAddress,
+              chainId: "sui:testnet",
+              availableCredits: 95
+            }
+          }),
+          { status: 201 }
+        )
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ session: createSession() }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            reservationId: "reservation_123",
+            status: "captured",
+            balance: {
+              appId: "app_123",
+              walletAddress: createSession().user.walletAddress,
+              chainId: "sui:testnet",
+              availableCredits: 95
+            },
+            transaction: {
+              transactionId: "tx_123",
+              appId: "app_123",
+              actionType: "say_hello",
+              walletAddress: createSession().user.walletAddress,
+              chainId: "sui:testnet",
+              username: "Ada",
+              message: "Ada says Hello Celeris!",
+              digest: "local-digest",
+              explorerUrl: "https://suiexplorer.com/txblock/local-digest?network=testnet",
+              status: "confirmed",
+              confirmedAt: "2026-06-30T00:00:00.000Z",
+              createdAt: "2026-06-30T00:00:00.000Z"
+            }
+          }),
+          { status: 200 }
+        )
+      );
+
+    const client = createCelerisBrowserClient({
+      appId: "app_123",
+      apiOrigin: "http://localhost:4100",
+      hostedAuthOrigin: "http://localhost:3101",
+      redirectUri: "http://localhost:3103/auth/callback"
+    });
+
+    await expect(client.actions.sayHello({ username: "Ada" })).resolves.toMatchObject({
+      reservationId: "reservation_123",
+      message: "Ada says Hello Celeris!",
+      balance: {
+        availableCredits: 95
+      }
+    });
+
+    const executeBody = JSON.parse(fetchMock.mock.calls[3]?.[1]?.body as string) as Record<string, unknown>;
+    expect(executeBody).toMatchObject({
+      username: "Ada",
+      transactionKind: expect.any(Object)
     });
   });
 });

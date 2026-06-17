@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { computeZkLoginAddress } from "@mysten/sui/zklogin";
 import { z } from "zod";
 import { authProviderSchema, chainIdSchema } from "./env";
-import { parseSuiAddress, parseSuiObjectId, parseSuiPackageId } from "./sui/hello-celeris";
+import { buildHelloCelerisSayHelloTransaction, parseSuiAddress, parseSuiObjectId, parseSuiPackageId } from "./sui/hello-celeris";
 
 export const CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO = "say_hello" as const;
 export const CELERIS_CHAIN_FAMILY_SUI = "sui" as const;
@@ -178,7 +178,8 @@ export const catalogActionSchema = z.object({
 export const appCatalogSchema = z.object({
   appId: z.string().min(1),
   chainId: chainIdSchema,
-  actions: z.array(catalogActionSchema)
+  actions: z.array(catalogActionSchema),
+  registeredProgram: registeredProgramSchema.nullable()
 });
 
 export const appCatalogResponseSchema = z.object({
@@ -229,6 +230,64 @@ export const checkoutSessionResponseSchema = z.object({
 export const completeCheckoutSessionResponseSchema = z.object({
   checkoutSession: checkoutSessionSchema,
   balance: appBalanceSchema
+});
+
+export const executeSayHelloSchema = z.object({
+  username: z.string().trim().min(1),
+  transactionKind: z.unknown()
+});
+
+export const sayHelloSponsorshipSchema = z.object({
+  reservationId: z.string().min(1),
+  transactionBytes: z.string().min(1),
+  sponsorSignature: z.string().min(1),
+  sponsorAddress: suiAddressSchema,
+  expiresAt: z.string().datetime(),
+  username: z.string().min(1),
+  message: z.string().min(1)
+});
+
+export const sayHelloSponsorshipResponseSchema = z.object({
+  sponsorship: sayHelloSponsorshipSchema,
+  balance: appBalanceSchema
+});
+
+export const completeSayHelloSchema = z.object({
+  reservationId: z.string().min(1),
+  outcome: z.union([z.literal("submitted"), z.literal("failed")]),
+  digest: z.string().trim().min(1).optional()
+});
+
+export const transactionRecordStatusSchema = z.union([
+  z.literal("submitted"),
+  z.literal("confirmed"),
+  z.literal("failed")
+]);
+
+export const transactionRecordSchema = z.object({
+  transactionId: z.string().min(1),
+  appId: z.string().min(1),
+  actionType: z.literal(CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO),
+  walletAddress: suiAddressSchema,
+  chainId: chainIdSchema,
+  username: z.string().min(1),
+  message: z.string().min(1),
+  digest: z.string().min(1),
+  explorerUrl: z.string().url(),
+  status: transactionRecordStatusSchema,
+  confirmedAt: z.string().datetime().nullable(),
+  createdAt: z.string().datetime()
+});
+
+export const appTransactionsResponseSchema = z.object({
+  transactions: z.array(transactionRecordSchema)
+});
+
+export const completeSayHelloResponseSchema = z.object({
+  reservationId: z.string().min(1),
+  status: z.union([z.literal("captured"), z.literal("released")]),
+  balance: appBalanceSchema,
+  transaction: transactionRecordSchema.nullable()
 });
 
 export const developerAppSchema = z.object({
@@ -294,6 +353,20 @@ export function deriveZkLoginWalletAddress(input: { issuer: string; subject: str
   );
 }
 
+export function buildSayHelloTransactionKindForApi(input: {
+  packageId: string;
+  authorityCapObjectId: string;
+  appStateObjectId: string;
+  username: string;
+}) {
+  return buildHelloCelerisSayHelloTransaction({
+    packageId: input.packageId,
+    appAuthorityCapObjectId: input.authorityCapObjectId,
+    appStateObjectId: input.appStateObjectId,
+    username: input.username
+  }).transactionKind;
+}
+
 export type DeveloperSummary = z.infer<typeof developerSummarySchema>;
 export type CreateAuthLoginRequestInput = z.infer<typeof createAuthLoginRequestSchema>;
 export type AuthLoginRequest = z.infer<typeof authLoginRequestSchema>;
@@ -313,3 +386,8 @@ export type AppBalance = z.infer<typeof appBalanceSchema>;
 export type CheckoutSessionStatus = z.infer<typeof checkoutSessionStatusSchema>;
 export type CreateCheckoutSessionInput = z.infer<typeof createCheckoutSessionSchema>;
 export type CheckoutSession = z.infer<typeof checkoutSessionSchema>;
+export type ExecuteSayHelloInput = z.infer<typeof executeSayHelloSchema>;
+export type SayHelloSponsorship = z.infer<typeof sayHelloSponsorshipSchema>;
+export type CompleteSayHelloInput = z.infer<typeof completeSayHelloSchema>;
+export type TransactionRecordStatus = z.infer<typeof transactionRecordStatusSchema>;
+export type AppTransactionRecord = z.infer<typeof transactionRecordSchema>;

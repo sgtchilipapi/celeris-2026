@@ -116,6 +116,9 @@ model App {
   registeredPrograms RegisteredProgram[]
   checkoutSessions CheckoutSession[]
   creditLedgerEntries CreditLedgerEntry[]
+  pendingActionReservations PendingActionReservation[]
+  sponsorGasCoinLocks SponsorGasCoinLock[]
+  transactionRecords TransactionRecord[]
 
   @@index([developerId])
   @@index([developerProfileId])
@@ -198,4 +201,65 @@ model CreditLedgerEntry {
 
   @@unique([appId, referenceType, referenceId, reason])
   @@index([appId, walletAddress])
+}
+
+model PendingActionReservation {
+  id               String   @id @default(cuid())
+  appId            String
+  walletAddress    String
+  chainId          String
+  actionType       String
+  status           String
+  username         String
+  message          String
+  creditsReserved  Int
+  transactionBytes String
+  sponsorSignature String
+  sponsorAddress   String
+  expiresAt        DateTime
+  submittedDigest  String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  app              App      @relation(fields: [appId], references: [id], onDelete: Cascade)
+  gasCoinLock      SponsorGasCoinLock?
+
+  @@index([appId, walletAddress])
+  @@index([status, expiresAt])
+}
+
+model SponsorGasCoinLock {
+  id            String   @id @default(cuid())
+  appId         String
+  reservationId String   @unique
+  objectId      String
+  version       String
+  digest        String
+  status        String
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  app           App      @relation(fields: [appId], references: [id], onDelete: Cascade)
+  reservation   PendingActionReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([appId, status])
+}
+
+model TransactionRecord {
+  id             String    @id @default(cuid())
+  appId          String
+  walletAddress  String
+  chainId        String
+  actionType     String
+  username       String
+  message        String
+  digest         String
+  explorerUrl    String
+  status         String
+  confirmedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  app            App       @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@unique([appId, digest])
+  @@index([appId, createdAt])
 }

@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { toBase64 } from "@mysten/bcs";
+import { SuiClient } from "@mysten/sui/client";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { z } from "zod";
 import {
@@ -21,22 +23,30 @@ import {
   createCheckoutSessionSchema,
   type CreateDeveloperAppInput,
   createDeveloperAppSchema,
+  type CompleteSayHelloInput,
+  completeSayHelloSchema,
   type DeveloperApp,
+  type ExecuteSayHelloInput,
+  executeSayHelloSchema,
+  assertHelloCelerisTransactionKindValueMatches,
+  buildCanonicalHelloCelerisSayHelloTransaction,
   registerProgramSchema,
   type RegisterProgramInput,
   deriveZkLoginSalt,
   deriveZkLoginWalletAddress
 } from "@celeris/shared";
 import { badGateway, badRequest, conflict, notFound, unauthorized } from "../../lib/http-error";
-import { encryptSecret, generateOpaqueToken, sha256 } from "./crypto";
+import { decryptSecret, encryptSecret, generateOpaqueToken, sha256 } from "./crypto";
 import type {
   AuthLoginRequestRecord,
   CheckoutSessionRecord,
   DeveloperAppAggregateRecord,
   DeveloperProfileRecord,
   ManagedActionRecord,
+  PendingActionReservationRecord,
   RegisteredProgramRecord,
   SponsorWalletRecord,
+  TransactionRecordRecord,
   UserSessionAggregateRecord,
   DeveloperSetupRepository
 } from "./repository";
@@ -44,7 +54,9 @@ import { createPrismaDeveloperSetupRepository } from "./repository";
 
 const USER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LOGIN_REQUEST_TTL_MS = 10 * 60 * 1000;
+const ACTION_RESERVATION_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_DASHBOARD_ZKLOGIN_MAX_EPOCH = 2;
+const DEFAULT_SUI_GAS_BUDGET = 50_000_000;
 const ZKLOGIN_SALT_UPPER_BOUND = 2n ** 128n;
 const zGoogleCallbackSchema = z.object({
   code: z.string().min(1),
@@ -76,6 +88,27 @@ export interface ZkLoginProver {
   }): Promise<Record<string, unknown> | null>;
 }
 
+export interface SponsoredTransactionPayload {
+  transactionBytes: string;
+  sponsorSignature: string;
+  sponsorAddress: string;
+  gasCoin: {
+    objectId: string;
+    version: string;
+    digest: string;
+  };
+}
+
+export interface SuiSponsorAdapter {
+  createSponsoredSayHello(input: {
+    transaction: ReturnType<typeof buildCanonicalHelloCelerisSayHelloTransaction>["transaction"];
+    userWalletAddress: string;
+    sponsorWallet: SponsorWalletRecord;
+    encryptionKey: string;
+  }): Promise<SponsoredTransactionPayload>;
+  verifyTransaction(input: { digest: string; expectedSender: string }): Promise<{ confirmedAt: Date }>;
+}
+
 export interface DeveloperSetupServiceOptions {
   repository?: DeveloperSetupRepository;
   encryptionKey: string;
@@ -92,6 +125,8 @@ export interface DeveloperSetupServiceOptions {
   zkLoginMaxEpochWindow?: number;
   googleOAuthClient?: GoogleOAuthClient;
   zkLoginProver?: ZkLoginProver;
+  suiSponsorAdapter?: SuiSponsorAdapter;
+  suiRpcOrigin?: string;
   allowTestIdentityCompletion?: boolean;
 }
 
@@ -268,6 +303,85 @@ type AppConsumerSession = Pick<AuthSession, "clientKind" | "appId"> & {
   user: Pick<AuthSession["user"], "walletAddress">;
 };
 
+class RuntimeSuiSponsorAdapter implements SuiSponsorAdapter {
+  private readonly client: SuiClient;
+
+  constructor(suiRpcOrigin: string) {
+    this.client = new SuiClient({
+      url: suiRpcOrigin
+    });
+  }
+
+  async createSponsoredSayHello(input: {
+    transaction: ReturnType<typeof buildCanonicalHelloCelerisSayHelloTransaction>["transaction"];
+    userWalletAddress: string;
+    sponsorWallet: SponsorWalletRecord;
+    encryptionKey: string;
+  }) {
+    const keypair = Ed25519Keypair.fromSecretKey(decryptSecret(input.sponsorWallet.encryptedSecret, input.encryptionKey));
+    const sponsorAddress = keypair.toSuiAddress();
+    const coins = await this.client.getCoins({
+      owner: sponsorAddress,
+      coinType: "0x2::sui::SUI",
+      limit: 1
+    });
+    const gasCoin = coins.data[0];
+
+    if (!gasCoin) {
+      throw badGateway("Sponsor wallet has no SUI gas coins");
+    }
+
+    input.transaction.setSender(input.userWalletAddress);
+    input.transaction.setGasOwner(sponsorAddress);
+    input.transaction.setGasBudget(DEFAULT_SUI_GAS_BUDGET);
+    input.transaction.setGasPayment([
+      {
+        objectId: gasCoin.coinObjectId,
+        version: gasCoin.version,
+        digest: gasCoin.digest
+      }
+    ]);
+
+    const bytes = await input.transaction.build({
+      client: this.client
+    });
+    const { signature } = await keypair.signTransaction(bytes);
+
+    return {
+      transactionBytes: toBase64(bytes),
+      sponsorSignature: signature,
+      sponsorAddress,
+      gasCoin: {
+        objectId: gasCoin.coinObjectId,
+        version: gasCoin.version,
+        digest: gasCoin.digest
+      }
+    };
+  }
+
+  async verifyTransaction(input: { digest: string; expectedSender: string }) {
+    const response = await this.client.getTransactionBlock({
+      digest: input.digest,
+      options: {
+        showInput: true,
+        showEffects: true
+      }
+    });
+
+    if (response.effects?.status.status !== "success") {
+      throw badRequest("Submitted transaction did not succeed");
+    }
+
+    if (response.transaction?.data.sender && response.transaction.data.sender !== input.expectedSender) {
+      throw badRequest("Submitted transaction sender does not match the active session");
+    }
+
+    return {
+      confirmedAt: response.timestampMs ? new Date(Number(response.timestampMs)) : new Date()
+    };
+  }
+}
+
 class RuntimeGoogleOAuthClient implements GoogleOAuthClient {
   constructor(
     private readonly options: {
@@ -411,6 +525,7 @@ export class DeveloperSetupService {
   private readonly zkLoginMaxEpochWindow: number;
   private readonly googleOAuthClient: GoogleOAuthClient;
   private readonly zkLoginProver: ZkLoginProver;
+  private readonly suiSponsorAdapter: SuiSponsorAdapter;
   private readonly allowTestIdentityCompletion: boolean;
 
   constructor(options: DeveloperSetupServiceOptions) {
@@ -435,6 +550,9 @@ export class DeveloperSetupService {
     this.zkLoginProver =
       options.zkLoginProver ??
       new RuntimeZkLoginProver(String(requireOption(options.zkLoginProverOrigin, "zkLoginProverOrigin")));
+    this.suiSponsorAdapter =
+      options.suiSponsorAdapter ??
+      new RuntimeSuiSponsorAdapter(options.suiRpcOrigin ?? "https://fullnode.testnet.sui.io:443");
     this.allowTestIdentityCompletion = options.allowTestIdentityCompletion ?? false;
   }
 
@@ -856,7 +974,8 @@ export class DeveloperSetupService {
     return {
       appId: app.app.id,
       chainId: chainIdSchema.parse(app.app.allowedChainId),
-      actions: app.sayHelloAction ? [toCatalogAction(app.sayHelloAction)] : []
+      actions: app.sayHelloAction ? [toCatalogAction(app.sayHelloAction)] : [],
+      registeredProgram: app.registeredProgram ? toRegisteredProgram(app.registeredProgram) : null
     };
   }
 
@@ -917,6 +1036,141 @@ export class DeveloperSetupService {
         availableCredits
       })
     };
+  }
+
+  async executeSayHello(session: AppConsumerSession, appId: string, input: ExecuteSayHelloInput) {
+    const appConsumer = this.requireAppConsumerSession(session, appId);
+    const app = await this.requirePublicApp(appId);
+    const payload = executeSayHelloSchema.parse(input);
+
+    if (!app.registeredProgram) {
+      throw badRequest("App Sui program is not registered");
+    }
+
+    if (!app.sponsorWallet) {
+      throw badRequest("App sponsor wallet is not provisioned");
+    }
+
+    if (!app.sayHelloAction?.isEnabled) {
+      throw badRequest("say_hello is not enabled for this app");
+    }
+
+    const built = buildCanonicalHelloCelerisSayHelloTransaction({
+      registeredProgram: app.registeredProgram,
+      userWalletAddress: appConsumer.walletAddress,
+      username: payload.username
+    });
+
+    try {
+      assertHelloCelerisTransactionKindValueMatches(payload.transactionKind, {
+        packageId: app.registeredProgram.packageId,
+        appAuthorityCapObjectId: app.registeredProgram.authorityCapObjectId,
+        appStateObjectId: app.registeredProgram.appStateObjectId,
+        username: built.normalizedUsername
+      });
+    } catch (error) {
+      throw badRequest(error instanceof Error ? error.message : "Invalid transaction kind");
+    }
+
+    const sponsored = await this.suiSponsorAdapter.createSponsoredSayHello({
+      transaction: built.transaction,
+      userWalletAddress: appConsumer.walletAddress,
+      sponsorWallet: app.sponsorWallet,
+      encryptionKey: this.encryptionKey
+    });
+    const reservation = await this.repository.createPendingActionReservation({
+      appId,
+      walletAddress: appConsumer.walletAddress,
+      chainId: appConsumer.chainId,
+      username: built.normalizedUsername,
+      message: built.message,
+      creditsReserved: app.sayHelloAction.priceCredits,
+      transactionBytes: sponsored.transactionBytes,
+      sponsorSignature: sponsored.sponsorSignature,
+      sponsorAddress: sponsored.sponsorAddress,
+      gasCoin: sponsored.gasCoin,
+      expiresAt: new Date(Date.now() + ACTION_RESERVATION_TTL_MS)
+    });
+
+    if (!reservation) {
+      throw badRequest("Insufficient credits");
+    }
+
+    const availableCredits = await this.repository.getCreditBalance(appId, appConsumer.walletAddress);
+
+    return {
+      sponsorship: this.toSponsorship(reservation),
+      balance: toBalance({
+        appId,
+        walletAddress: appConsumer.walletAddress,
+        chainId: appConsumer.chainId,
+        availableCredits
+      })
+    };
+  }
+
+  async completeSayHello(session: AppConsumerSession, appId: string, input: CompleteSayHelloInput) {
+    const appConsumer = this.requireAppConsumerSession(session, appId);
+    await this.requirePublicApp(appId);
+    const payload = completeSayHelloSchema.parse(input);
+    const existing = await this.repository.findPendingActionReservationById(appId, payload.reservationId);
+
+    if (!existing || existing.walletAddress !== appConsumer.walletAddress) {
+      throw notFound("Action reservation not found");
+    }
+
+    if (existing.expiresAt.getTime() <= Date.now() && existing.status === "reserved") {
+      payload.outcome = "failed";
+    }
+
+    let verifiedAt: Date | undefined;
+    let explorerUrl: string | undefined;
+
+    if (payload.outcome === "submitted") {
+      if (!payload.digest) {
+        throw badRequest("digest is required for submitted transactions");
+      }
+      const verified = await this.suiSponsorAdapter.verifyTransaction({
+        digest: payload.digest,
+        expectedSender: appConsumer.walletAddress
+      });
+      verifiedAt = verified.confirmedAt;
+      explorerUrl = this.toExplorerUrl(payload.digest);
+    }
+
+    const result = await this.repository.completePendingActionReservation({
+      appId,
+      walletAddress: appConsumer.walletAddress,
+      reservationId: payload.reservationId,
+      outcome: payload.outcome,
+      digest: payload.digest,
+      explorerUrl,
+      verifiedAt
+    });
+
+    if (!result) {
+      throw notFound("Action reservation not found");
+    }
+
+    const availableCredits = await this.repository.getCreditBalance(appId, appConsumer.walletAddress);
+
+    return {
+      reservationId: result.reservation.id,
+      status: result.reservation.status === "captured" ? "captured" : "released",
+      balance: toBalance({
+        appId,
+        walletAddress: appConsumer.walletAddress,
+        chainId: appConsumer.chainId,
+        availableCredits
+      }),
+      transaction: result.transaction ? this.toTransactionRecord(result.transaction) : null
+    };
+  }
+
+  async listTransactions(appId: string) {
+    await this.requirePublicApp(appId);
+    const records = await this.repository.listTransactions(appId);
+    return records.map((record) => this.toTransactionRecord(record));
   }
 
   private async resolveUserIdentity(identity: VerifiedGoogleIdentity) {
@@ -1057,6 +1311,39 @@ export class DeveloperSetupService {
       updatedAt: record.updatedAt.toISOString()
     };
   }
+
+  private toSponsorship(record: PendingActionReservationRecord) {
+    return {
+      reservationId: record.id,
+      transactionBytes: record.transactionBytes,
+      sponsorSignature: record.sponsorSignature,
+      sponsorAddress: record.sponsorAddress,
+      expiresAt: record.expiresAt.toISOString(),
+      username: record.username,
+      message: record.message
+    };
+  }
+
+  private toTransactionRecord(record: TransactionRecordRecord) {
+    return {
+      transactionId: record.id,
+      appId: record.appId,
+      actionType: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
+      walletAddress: record.walletAddress,
+      chainId: chainIdSchema.parse(record.chainId),
+      username: record.username,
+      message: record.message,
+      digest: record.digest,
+      explorerUrl: record.explorerUrl,
+      status: record.status,
+      confirmedAt: record.confirmedAt ? record.confirmedAt.toISOString() : null,
+      createdAt: record.createdAt.toISOString()
+    };
+  }
+
+  private toExplorerUrl(digest: string) {
+    return `https://suiexplorer.com/txblock/${encodeURIComponent(digest)}?network=testnet`;
+  }
 }
 
 let runtimeDeveloperSetupService: DeveloperSetupService | undefined;
@@ -1080,6 +1367,7 @@ export function getRuntimeDeveloperSetupService(
     | "zkLoginSaltSeed"
     | "zkLoginProverOrigin"
     | "zkLoginMaxEpochWindow"
+    | "suiRpcOrigin"
   >
 ) {
   if (!runtimeDeveloperSetupService) {

@@ -4,16 +4,23 @@ import {
   appCatalogResponseSchema,
   authLoginRequestResponseSchema,
   authSessionResponseSchema,
+  appTransactionsResponseSchema,
+  buildHelloCelerisSayHelloTransaction,
   checkoutSessionResponseSchema,
+  completeSayHelloResponseSchema,
   completeCheckoutSessionResponseSchema,
+  sayHelloSponsorshipResponseSchema,
   type AppBalance,
   type AppCatalog,
+  type AppTransactionRecord,
   type AuthLoginRequest,
   type AuthSession,
   type CheckoutSession
 } from "@celeris/shared";
+import { fromBase64 } from "@mysten/bcs";
+import { SuiClient } from "@mysten/sui/client";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
-import { generateNonce, generateRandomness, getExtendedEphemeralPublicKey } from "@mysten/sui/zklogin";
+import { generateNonce, generateRandomness, getExtendedEphemeralPublicKey, getZkLoginSignature } from "@mysten/sui/zklogin";
 
 export interface CelerisBrowserClientConfig {
   appId: string;
@@ -32,10 +39,6 @@ export interface StartCheckoutOptions {
   redirect?: boolean;
   successRedirectUrl?: string;
   cancelRedirectUrl?: string;
-}
-
-function notImplemented(methodName: string): never {
-  throw new Error(`${methodName} is not implemented in this slice`);
 }
 
 const sessionStorageKeyPrefix = "celeris.auth.session";
@@ -127,6 +130,18 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
     return stored ? authSessionResponseSchema.shape.session.parse(JSON.parse(stored)) : null;
   }
 
+  function readEphemeralSecretKey() {
+    const stored = getSessionStorage().getItem(ephemeralStorageKey);
+    if (!stored) {
+      throw new Error("Celeris zkLogin ephemeral key material is missing");
+    }
+    const parsed = JSON.parse(stored) as { ephemeralSecretKey?: unknown };
+    if (typeof parsed.ephemeralSecretKey !== "string") {
+      throw new Error("Celeris zkLogin ephemeral key material is invalid");
+    }
+    return parsed.ephemeralSecretKey;
+  }
+
   async function requireStoredSession() {
     const session = await client.auth.getSession();
 
@@ -150,6 +165,37 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
       },
       parser
     );
+  }
+
+  async function submitSponsoredTransaction(session: AuthSession, transactionBytes: string, sponsorSignature: string) {
+    if (!config.suiRpcOrigin) {
+      return {
+        digest: `local-${createRandomToken(16)}`
+      };
+    }
+
+    if (!session.zkLogin?.proofInputs || session.zkLogin.maxEpoch === null) {
+      throw new Error("Celeris zkLogin session material is required to submit sponsored transactions");
+    }
+
+    const ephemeralKeypair = Ed25519Keypair.fromSecretKey(readEphemeralSecretKey());
+    const { signature: userSignature } = await ephemeralKeypair.signTransaction(fromBase64(transactionBytes));
+    const zkLoginSignature = getZkLoginSignature({
+      inputs: session.zkLogin.proofInputs as never,
+      maxEpoch: session.zkLogin.maxEpoch,
+      userSignature
+    });
+    const client = new SuiClient({
+      url: config.suiRpcOrigin
+    });
+
+    return client.executeTransactionBlock({
+      transactionBlock: fromBase64(transactionBytes),
+      signature: [zkLoginSignature, sponsorSignature],
+      options: {
+        showEffects: true
+      }
+    });
   }
 
   const client = {
@@ -311,10 +357,91 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
       }
     },
     actions: {
-      sayHello: async (_input: { username: string }) => notImplemented("actions.sayHello")
+      sayHello: async (input: { username: string }): Promise<{
+        reservationId: string;
+        digest: string;
+        message: string;
+        balance: AppBalance;
+        transaction: AppTransactionRecord | null;
+      }> => {
+        const session = await requireStoredSession();
+        const catalog = await client.apps.getCatalog();
+
+        if (!catalog.registeredProgram) {
+          throw new Error("Celeris app is missing registered Sui program metadata");
+        }
+
+        const { transactionKind } = buildHelloCelerisSayHelloTransaction({
+          packageId: catalog.registeredProgram.packageId,
+          appAuthorityCapObjectId: catalog.registeredProgram.authorityCapObjectId,
+          appStateObjectId: catalog.registeredProgram.appStateObjectId,
+          username: input.username
+        });
+        const execution = await requestAuthenticatedJson(
+          new URL(`/v1/apps/${config.appId}/actions/say_hello/execute`, config.apiOrigin),
+          {
+            method: "POST",
+            body: JSON.stringify({
+              username: input.username,
+              transactionKind
+            })
+          },
+          sayHelloSponsorshipResponseSchema
+        );
+
+        try {
+          const submitted = await submitSponsoredTransaction(
+            session,
+            execution.sponsorship.transactionBytes,
+            execution.sponsorship.sponsorSignature
+          );
+          const completion = await requestAuthenticatedJson(
+            new URL(`/v1/apps/${config.appId}/actions/say_hello/complete`, config.apiOrigin),
+            {
+              method: "POST",
+              body: JSON.stringify({
+                reservationId: execution.sponsorship.reservationId,
+                outcome: "submitted",
+                digest: submitted.digest
+              })
+            },
+            completeSayHelloResponseSchema
+          );
+
+          return {
+            reservationId: execution.sponsorship.reservationId,
+            digest: submitted.digest,
+            message: execution.sponsorship.message,
+            balance: completion.balance,
+            transaction: completion.transaction
+          };
+        } catch (error) {
+          await requestAuthenticatedJson(
+            new URL(`/v1/apps/${config.appId}/actions/say_hello/complete`, config.apiOrigin),
+            {
+              method: "POST",
+              body: JSON.stringify({
+                reservationId: execution.sponsorship.reservationId,
+                outcome: "failed"
+              })
+            },
+            completeSayHelloResponseSchema
+          ).catch(() => null);
+          throw error;
+        }
+      }
     },
     transactions: {
-      list: async () => notImplemented("transactions.list")
+      list: async (): Promise<AppTransactionRecord[]> => {
+        const response = await requestJson(
+          new URL(`/v1/apps/${config.appId}/transactions`, config.apiOrigin),
+          {
+            method: "GET"
+          },
+          appTransactionsResponseSchema
+        );
+        return response.transactions;
+      }
     }
   };
 

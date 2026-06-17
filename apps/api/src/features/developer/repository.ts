@@ -121,6 +121,54 @@ export interface CheckoutSessionRecord {
   updatedAt: Date;
 }
 
+export interface PendingActionReservationRecord {
+  id: string;
+  appId: string;
+  walletAddress: string;
+  chainId: string;
+  actionType: string;
+  status: string;
+  username: string;
+  message: string;
+  creditsReserved: number;
+  transactionBytes: string;
+  sponsorSignature: string;
+  sponsorAddress: string;
+  expiresAt: Date;
+  submittedDigest: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface SponsorGasCoinLockRecord {
+  id: string;
+  appId: string;
+  reservationId: string;
+  objectId: string;
+  version: string;
+  digest: string;
+  status: string;
+  expiresAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface TransactionRecordRecord {
+  id: string;
+  appId: string;
+  walletAddress: string;
+  chainId: string;
+  actionType: string;
+  username: string;
+  message: string;
+  digest: string;
+  explorerUrl: string;
+  status: string;
+  confirmedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface DeveloperAppAggregateRecord {
   app: AppRecord;
   sponsorWallet: SponsorWalletRecord | null;
@@ -230,6 +278,36 @@ export interface CompleteCheckoutSessionRecordInput {
   checkoutSessionId: string;
 }
 
+export interface SponsorGasCoinRefInput {
+  objectId: string;
+  version: string;
+  digest: string;
+}
+
+export interface CreatePendingActionReservationInput {
+  appId: string;
+  walletAddress: string;
+  chainId: string;
+  username: string;
+  message: string;
+  creditsReserved: number;
+  transactionBytes: string;
+  sponsorSignature: string;
+  sponsorAddress: string;
+  gasCoin: SponsorGasCoinRefInput;
+  expiresAt: Date;
+}
+
+export interface CompletePendingActionReservationInput {
+  appId: string;
+  walletAddress: string;
+  reservationId: string;
+  outcome: "submitted" | "failed";
+  digest?: string;
+  explorerUrl?: string;
+  verifiedAt?: Date;
+}
+
 export interface DeveloperSetupRepository {
   findUserIdentityById(id: string): Promise<UserIdentityRecord | null>;
   findUserIdentityByIssuerSubject(issuer: string, subject: string): Promise<UserIdentityRecord | null>;
@@ -258,6 +336,13 @@ export interface DeveloperSetupRepository {
   findCheckoutSessionById(appId: string, checkoutSessionId: string): Promise<CheckoutSessionRecord | null>;
   completeCheckoutSession(input: CompleteCheckoutSessionRecordInput): Promise<CheckoutSessionRecord | null>;
   getCreditBalance(appId: string, walletAddress: string): Promise<number>;
+  createPendingActionReservation(input: CreatePendingActionReservationInput): Promise<PendingActionReservationRecord | null>;
+  findPendingActionReservationById(appId: string, reservationId: string): Promise<PendingActionReservationRecord | null>;
+  completePendingActionReservation(input: CompletePendingActionReservationInput): Promise<{
+    reservation: PendingActionReservationRecord;
+    transaction: TransactionRecordRecord | null;
+  } | null>;
+  listTransactions(appId: string): Promise<TransactionRecordRecord[]>;
 }
 
 function extractSayHelloAction(actions: ManagedActionRecord[]) {
@@ -675,6 +760,206 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
       });
 
       return aggregate._sum.deltaCredits ?? 0;
+    },
+    async createPendingActionReservation(input) {
+      return prisma.$transaction(async (tx) => {
+        const balance = await tx.creditLedgerEntry.aggregate({
+          where: {
+            appId: input.appId,
+            walletAddress: input.walletAddress
+          },
+          _sum: {
+            deltaCredits: true
+          }
+        });
+
+        if ((balance._sum.deltaCredits ?? 0) < input.creditsReserved) {
+          return null;
+        }
+
+        const reservation = await tx.pendingActionReservation.create({
+          data: {
+            appId: input.appId,
+            walletAddress: input.walletAddress,
+            chainId: input.chainId,
+            actionType: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
+            status: "reserved",
+            username: input.username,
+            message: input.message,
+            creditsReserved: input.creditsReserved,
+            transactionBytes: input.transactionBytes,
+            sponsorSignature: input.sponsorSignature,
+            sponsorAddress: input.sponsorAddress,
+            expiresAt: input.expiresAt
+          }
+        });
+
+        await tx.sponsorGasCoinLock.create({
+          data: {
+            appId: input.appId,
+            reservationId: reservation.id,
+            objectId: input.gasCoin.objectId,
+            version: input.gasCoin.version,
+            digest: input.gasCoin.digest,
+            status: "locked",
+            expiresAt: input.expiresAt
+          }
+        });
+
+        await tx.creditLedgerEntry.create({
+          data: {
+            appId: input.appId,
+            walletAddress: input.walletAddress,
+            chainId: input.chainId,
+            deltaCredits: -input.creditsReserved,
+            reason: "reserve",
+            referenceType: "action_reservation",
+            referenceId: reservation.id
+          }
+        });
+
+        return reservation;
+      });
+    },
+    async findPendingActionReservationById(appId, reservationId) {
+      return prisma.pendingActionReservation.findFirst({
+        where: {
+          id: reservationId,
+          appId
+        }
+      });
+    },
+    async completePendingActionReservation(input) {
+      return prisma.$transaction(async (tx) => {
+        const reservation = await tx.pendingActionReservation.findFirst({
+          where: {
+            id: input.reservationId,
+            appId: input.appId,
+            walletAddress: input.walletAddress
+          }
+        });
+
+        if (!reservation) {
+          return null;
+        }
+
+        if (reservation.status === "captured" || reservation.status === "released") {
+          const transaction = input.digest
+            ? await tx.transactionRecord.findUnique({
+                where: {
+                  appId_digest: {
+                    appId: input.appId,
+                    digest: input.digest
+                  }
+                }
+              })
+            : null;
+          return { reservation, transaction };
+        }
+
+        if (input.outcome === "failed") {
+          const released = await tx.pendingActionReservation.update({
+            where: { id: reservation.id },
+            data: {
+              status: "released"
+            }
+          });
+          await tx.sponsorGasCoinLock.updateMany({
+            where: { reservationId: reservation.id },
+            data: { status: "released" }
+          });
+          await tx.creditLedgerEntry.upsert({
+            where: {
+              appId_referenceType_referenceId_reason: {
+                appId: input.appId,
+                referenceType: "action_reservation",
+                referenceId: reservation.id,
+                reason: "release"
+              }
+            },
+            update: {},
+            create: {
+              appId: input.appId,
+              walletAddress: input.walletAddress,
+              chainId: reservation.chainId,
+              deltaCredits: reservation.creditsReserved,
+              reason: "release",
+              referenceType: "action_reservation",
+              referenceId: reservation.id
+            }
+          });
+          return { reservation: released, transaction: null };
+        }
+
+        if (!input.digest || !input.explorerUrl || !input.verifiedAt) {
+          throw new Error("Submitted reservations require digest verification details");
+        }
+
+        const captured = await tx.pendingActionReservation.update({
+          where: { id: reservation.id },
+          data: {
+            status: "captured",
+            submittedDigest: input.digest
+          }
+        });
+        await tx.sponsorGasCoinLock.updateMany({
+          where: { reservationId: reservation.id },
+          data: { status: "spent" }
+        });
+        await tx.creditLedgerEntry.upsert({
+          where: {
+            appId_referenceType_referenceId_reason: {
+              appId: input.appId,
+              referenceType: "action_reservation",
+              referenceId: reservation.id,
+              reason: "capture"
+            }
+          },
+          update: {},
+          create: {
+            appId: input.appId,
+            walletAddress: input.walletAddress,
+            chainId: reservation.chainId,
+            deltaCredits: 0,
+            reason: "capture",
+            referenceType: "action_reservation",
+            referenceId: reservation.id
+          }
+        });
+        const transaction = await tx.transactionRecord.upsert({
+          where: {
+            appId_digest: {
+              appId: input.appId,
+              digest: input.digest
+            }
+          },
+          update: {
+            status: "confirmed",
+            confirmedAt: input.verifiedAt
+          },
+          create: {
+            appId: input.appId,
+            walletAddress: input.walletAddress,
+            chainId: reservation.chainId,
+            actionType: reservation.actionType,
+            username: reservation.username,
+            message: reservation.message,
+            digest: input.digest,
+            explorerUrl: input.explorerUrl,
+            status: "confirmed",
+            confirmedAt: input.verifiedAt
+          }
+        });
+
+        return { reservation: captured, transaction };
+      });
+    },
+    async listTransactions(appId) {
+      return prisma.transactionRecord.findMany({
+        where: { appId },
+        orderBy: { createdAt: "desc" },
+        take: 50
+      });
     }
   };
 }
@@ -692,6 +977,8 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
   const programsByAppId = new Map<string, RegisteredProgramRecord>();
   const actionsByAppId = new Map<string, ManagedActionRecord>();
   const checkoutSessions = new Map<string, CheckoutSessionRecord>();
+  const pendingActionReservations = new Map<string, PendingActionReservationRecord>();
+  const transactionRecords = new Map<string, TransactionRecordRecord>();
   const ledgerEntriesByReference = new Map<
     string,
     {
@@ -1027,6 +1314,115 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
       }
 
       return balance;
+    },
+    async createPendingActionReservation(input) {
+      let balance = 0;
+      for (const entry of ledgerEntriesByReference.values()) {
+        if (entry.appId === input.appId && entry.walletAddress === input.walletAddress) {
+          balance += entry.deltaCredits;
+        }
+      }
+      if (balance < input.creditsReserved) {
+        return null;
+      }
+      const now = new Date();
+      const record: PendingActionReservationRecord = {
+        id: makeId("reservation"),
+        appId: input.appId,
+        walletAddress: input.walletAddress,
+        chainId: input.chainId,
+        actionType: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
+        status: "reserved",
+        username: input.username,
+        message: input.message,
+        creditsReserved: input.creditsReserved,
+        transactionBytes: input.transactionBytes,
+        sponsorSignature: input.sponsorSignature,
+        sponsorAddress: input.sponsorAddress,
+        expiresAt: input.expiresAt,
+        submittedDigest: null,
+        createdAt: now,
+        updatedAt: now
+      };
+      pendingActionReservations.set(record.id, record);
+      ledgerEntriesByReference.set(`${record.appId}:action_reservation:${record.id}:reserve`, {
+        appId: record.appId,
+        walletAddress: record.walletAddress,
+        deltaCredits: -record.creditsReserved
+      });
+      return record;
+    },
+    async findPendingActionReservationById(appId, reservationId) {
+      const record = pendingActionReservations.get(reservationId);
+      return record?.appId === appId ? record : null;
+    },
+    async completePendingActionReservation(input) {
+      const existing = pendingActionReservations.get(input.reservationId);
+
+      if (!existing || existing.appId !== input.appId || existing.walletAddress !== input.walletAddress) {
+        return null;
+      }
+
+      if (existing.status === "captured" || existing.status === "released") {
+        return {
+          reservation: existing,
+          transaction: existing.submittedDigest ? transactionRecords.get(`${existing.appId}:${existing.submittedDigest}`) ?? null : null
+        };
+      }
+
+      if (input.outcome === "failed") {
+        const released: PendingActionReservationRecord = {
+          ...existing,
+          status: "released",
+          updatedAt: new Date()
+        };
+        pendingActionReservations.set(released.id, released);
+        ledgerEntriesByReference.set(`${released.appId}:action_reservation:${released.id}:release`, {
+          appId: released.appId,
+          walletAddress: released.walletAddress,
+          deltaCredits: released.creditsReserved
+        });
+        return { reservation: released, transaction: null };
+      }
+
+      if (!input.digest || !input.explorerUrl || !input.verifiedAt) {
+        throw new Error("Submitted reservations require digest verification details");
+      }
+
+      const captured: PendingActionReservationRecord = {
+        ...existing,
+        status: "captured",
+        submittedDigest: input.digest,
+        updatedAt: new Date()
+      };
+      const transaction: TransactionRecordRecord = {
+        id: makeId("tx"),
+        appId: captured.appId,
+        walletAddress: captured.walletAddress,
+        chainId: captured.chainId,
+        actionType: captured.actionType,
+        username: captured.username,
+        message: captured.message,
+        digest: input.digest,
+        explorerUrl: input.explorerUrl,
+        status: "confirmed",
+        confirmedAt: input.verifiedAt,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      pendingActionReservations.set(captured.id, captured);
+      transactionRecords.set(`${transaction.appId}:${transaction.digest}`, transaction);
+      ledgerEntriesByReference.set(`${captured.appId}:action_reservation:${captured.id}:capture`, {
+        appId: captured.appId,
+        walletAddress: captured.walletAddress,
+        deltaCredits: 0
+      });
+      return { reservation: captured, transaction };
+    },
+    async listTransactions(appId) {
+      return Array.from(transactionRecords.values())
+        .filter((record) => record.appId === appId)
+        .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
     }
   };
 }

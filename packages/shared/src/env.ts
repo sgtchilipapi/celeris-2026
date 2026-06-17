@@ -20,7 +20,8 @@ export const apiEnvSchema = z.object({
   CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW: z.coerce
     .number()
     .int()
-    .positive("CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW must be a positive integer")
+    .positive("CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW must be a positive integer"),
+  CELERIS_SUI_RPC_ORIGIN: z.string().url("CELERIS_SUI_RPC_ORIGIN must be a valid URL").default("https://fullnode.testnet.sui.io:443")
 });
 
 export const webEnvSchema = z.object({
@@ -29,7 +30,8 @@ export const webEnvSchema = z.object({
   NEXT_PUBLIC_DEVELOPER_APP_ORIGIN: z.string().url().default("https://app.celeris.pro"),
   NEXT_PUBLIC_DEMO_FRONTEND_ORIGIN: z.string().url().default("https://demo.celeris.pro"),
   NEXT_PUBLIC_HOSTED_AUTH_ORIGIN: z.string().url().default("https://auth.celeris.pro"),
-  NEXT_PUBLIC_DEMO_APP_ID: z.string().trim().default("")
+  NEXT_PUBLIC_DEMO_APP_ID: z.string().trim().default(""),
+  NEXT_PUBLIC_SUI_RPC_ORIGIN: z.string().url().default("https://fullnode.testnet.sui.io:443")
 });
 
 export const databaseEnvSchema = z.object({

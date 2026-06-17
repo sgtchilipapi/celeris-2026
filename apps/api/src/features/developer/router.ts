@@ -26,7 +26,8 @@ function getService(options?: DeveloperRouterOptions) {
     googleIssuer: env.CELERIS_GOOGLE_ISSUER,
     zkLoginSaltSeed: env.CELERIS_ZKLOGIN_SALT_SEED,
     zkLoginProverOrigin: env.CELERIS_ZKLOGIN_PROVER_ORIGIN,
-    zkLoginMaxEpochWindow: env.CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW
+    zkLoginMaxEpochWindow: env.CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW,
+    suiRpcOrigin: env.CELERIS_SUI_RPC_ORIGIN
   });
 }
 
@@ -248,6 +249,29 @@ export function createDeveloperRouter(options?: DeveloperRouterOptions) {
       requireRouteParam(req.params.checkoutSessionId, "checkoutSessionId")
     );
     res.status(200).json(result);
+  });
+
+  router.post("/v1/apps/:appId/actions/say_hello/execute", userSession, async (req, res) => {
+    const result = await resolveService().executeSayHello(
+      res.locals.userSession,
+      requireRouteParam(req.params.appId, "appId"),
+      req.body
+    );
+    res.status(201).json(result);
+  });
+
+  router.post("/v1/apps/:appId/actions/say_hello/complete", userSession, async (req, res) => {
+    const result = await resolveService().completeSayHello(
+      res.locals.userSession,
+      requireRouteParam(req.params.appId, "appId"),
+      req.body
+    );
+    res.status(200).json(result);
+  });
+
+  router.get("/v1/apps/:appId/transactions", async (req, res) => {
+    const transactions = await resolveService().listTransactions(requireRouteParam(req.params.appId, "appId"));
+    res.status(200).json({ transactions });
   });
 
   return router;

@@ -47,6 +47,7 @@ describe("DemoConsumerShell", () => {
             catalog: {
               appId: "app_123",
               chainId: "sui:testnet",
+              registeredProgram: null,
               actions: [
                 {
                   actionType: "say_hello",
@@ -63,6 +64,14 @@ describe("DemoConsumerShell", () => {
             }
           }
         )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ transactions: [] }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        })
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ session }), {
@@ -96,6 +105,7 @@ describe("DemoConsumerShell", () => {
         apiOrigin="http://localhost:4100"
         hostedAuthOrigin="http://localhost:3101"
         demoFrontendOrigin="http://localhost:3103"
+        suiRpcOrigin="https://fullnode.testnet.sui.io:443"
         initialAppId="app_123"
       />
     );

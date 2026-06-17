@@ -3,9 +3,10 @@ import { createRequest, createResponse } from "node-mocks-http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app";
 import { createInMemoryDeveloperSetupRepository } from "../src/features/developer/repository";
-import type { GoogleOAuthClient, VerifiedGoogleIdentity, ZkLoginProver } from "../src/features/developer/service";
+import type { GoogleOAuthClient, SuiSponsorAdapter, VerifiedGoogleIdentity, ZkLoginProver } from "../src/features/developer/service";
 import { createDeveloperSetupService } from "../src/features/developer/service";
 import { unauthorized } from "../src/lib/http-error";
+import { buildHelloCelerisSayHelloTransaction } from "@celeris/shared";
 
 const validPackageId = "0x2c45b9cf7d7c5fc33dbd0a1b5c14fffd7a74ac6f9ed6d7f2d881d7ec8e5a2011";
 const validAppStateObjectId = "0x6f5f67b135cb76aab0b0d3cf90a227ca31da93c1df2c0d0e42f7324de8f0fe21";
@@ -22,7 +23,8 @@ const originalEnv = {
   CELERIS_GOOGLE_ISSUER: process.env.CELERIS_GOOGLE_ISSUER,
   CELERIS_ZKLOGIN_SALT_SEED: process.env.CELERIS_ZKLOGIN_SALT_SEED,
   CELERIS_ZKLOGIN_PROVER_ORIGIN: process.env.CELERIS_ZKLOGIN_PROVER_ORIGIN,
-  CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW: process.env.CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW
+  CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW: process.env.CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW,
+  CELERIS_SUI_RPC_ORIGIN: process.env.CELERIS_SUI_RPC_ORIGIN
 };
 
 function setRequiredApiEnv() {
@@ -38,6 +40,7 @@ function setRequiredApiEnv() {
   process.env.CELERIS_ZKLOGIN_SALT_SEED = "test-zklogin-salt-seed-0123456789";
   process.env.CELERIS_ZKLOGIN_PROVER_ORIGIN = "http://localhost:9000";
   process.env.CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW = "2";
+  process.env.CELERIS_SUI_RPC_ORIGIN = "https://fullnode.testnet.sui.io:443";
 }
 
 function restoreEnv() {
@@ -95,6 +98,29 @@ const mockZkLoginProver: ZkLoginProver = {
   }
 };
 
+const mockSuiSponsorAdapter: SuiSponsorAdapter = {
+  async createSponsoredSayHello(input) {
+    return {
+      transactionBytes: "mock-transaction-bytes",
+      sponsorSignature: "mock-sponsor-signature",
+      sponsorAddress: input.sponsorWallet.address,
+      gasCoin: {
+        objectId: "0x2",
+        version: "1",
+        digest: "gas-digest"
+      }
+    };
+  },
+  async verifyTransaction(input) {
+    if (input.digest === "bad-digest") {
+      throw unauthorized("Invalid digest");
+    }
+    return {
+      confirmedAt: new Date("2026-06-17T00:00:00.000Z")
+    };
+  }
+};
+
 function createTestHarness() {
   const service = createDeveloperSetupService({
     repository: createInMemoryDeveloperSetupRepository(),
@@ -110,7 +136,8 @@ function createTestHarness() {
     zkLoginSaltSeed: "test-zklogin-salt-seed-0123456789",
     zkLoginProverOrigin: "http://localhost:9000",
     googleOAuthClient: createMockGoogleOAuthClient(),
-    zkLoginProver: mockZkLoginProver
+    zkLoginProver: mockZkLoginProver,
+    suiSponsorAdapter: mockSuiSponsorAdapter
   });
 
   return createApp({ service });
@@ -388,6 +415,7 @@ describe("developer setup routes", () => {
         isEnabled: true
       }
     ]);
+    expect(catalog.json.catalog.registeredProgram).toBeNull();
 
     const emptyBalance = await requestJson(app, {
       method: "GET",
@@ -433,6 +461,111 @@ describe("developer setup routes", () => {
 
     expect(repeatComplete.statusCode).toBe(200);
     expect(repeatComplete.json.balance.availableCredits).toBe(100);
+  });
+
+  it("reserves credits, completes sponsored say_hello, captures credits, and lists the feed newest first", async () => {
+    const developerToken = await authenticateDashboard(app, "hello-owner@example.com");
+    const createAppResponse = await requestJson(app, {
+      method: "POST",
+      url: "/v1/developer/apps",
+      token: developerToken,
+      body: {
+        name: "Sponsored Hello App"
+      }
+    });
+    const appId = createAppResponse.json.app.appId as string;
+    await requestJson(app, {
+      method: "POST",
+      url: `/v1/developer/apps/${appId}/sponsor-wallet`,
+      token: developerToken
+    });
+    await requestJson(app, {
+      method: "PUT",
+      url: `/v1/developer/apps/${appId}/program`,
+      token: developerToken,
+      body: {
+        packageId: validPackageId,
+        appStateObjectId: validAppStateObjectId,
+        authorityCapObjectId: validAuthorityCapObjectId
+      }
+    });
+    await requestJson(app, {
+      method: "PUT",
+      url: `/v1/developer/apps/${appId}/actions/say_hello`,
+      token: developerToken,
+      body: {
+        priceCredits: 7,
+        isEnabled: true
+      }
+    });
+    const consumerToken = await authenticateConsumer(app, appId, "hello-user");
+    const checkout = await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${appId}/checkout-sessions`,
+      token: consumerToken,
+      body: {
+        credits: 10
+      }
+    });
+    await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${appId}/checkout-sessions/${checkout.json.checkoutSession.checkoutSessionId}/complete`,
+      token: consumerToken
+    });
+    const { transactionKind } = buildHelloCelerisSayHelloTransaction({
+      packageId: validPackageId,
+      appAuthorityCapObjectId: validAuthorityCapObjectId,
+      appStateObjectId: validAppStateObjectId,
+      username: "  Ada  "
+    });
+
+    const execute = await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${appId}/actions/say_hello/execute`,
+      token: consumerToken,
+      body: {
+        username: "  Ada  ",
+        transactionKind
+      }
+    });
+
+    expect(execute.statusCode).toBe(201);
+    expect(execute.json.sponsorship).toMatchObject({
+      username: "Ada",
+      message: "Ada says Hello Celeris!",
+      transactionBytes: "mock-transaction-bytes",
+      sponsorSignature: "mock-sponsor-signature"
+    });
+    expect(execute.json.balance.availableCredits).toBe(3);
+
+    const complete = await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${appId}/actions/say_hello/complete`,
+      token: consumerToken,
+      body: {
+        reservationId: execute.json.sponsorship.reservationId,
+        outcome: "submitted",
+        digest: "digest_123"
+      }
+    });
+
+    expect(complete.statusCode).toBe(200);
+    expect(complete.json.status).toBe("captured");
+    expect(complete.json.balance.availableCredits).toBe(3);
+    expect(complete.json.transaction).toMatchObject({
+      digest: "digest_123",
+      username: "Ada",
+      message: "Ada says Hello Celeris!"
+    });
+
+    const feed = await requestJson(app, {
+      method: "GET",
+      url: `/v1/apps/${appId}/transactions`
+    });
+
+    expect(feed.statusCode).toBe(200);
+    expect(feed.json.transactions).toHaveLength(1);
+    expect(feed.json.transactions[0].digest).toBe("digest_123");
   });
 
   it("keeps mock identity completion unreachable from the production auth route", async () => {

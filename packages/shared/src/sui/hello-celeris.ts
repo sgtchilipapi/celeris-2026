@@ -148,7 +148,14 @@ export function assertHelloCelerisSayHelloTransactionKindMatches(
   transaction: Transaction,
   params: HelloCelerisSayHelloTransactionParams
 ) {
-  const actual = extractComparableTransactionKindShape(transaction.getData());
+  assertHelloCelerisTransactionKindValueMatches(transaction.getData(), params);
+}
+
+export function assertHelloCelerisTransactionKindValueMatches(
+  transactionKind: unknown,
+  params: HelloCelerisSayHelloTransactionParams
+) {
+  const actual = extractComparableTransactionKindShape(transactionKind);
   const expected = extractComparableTransactionKindShape(buildHelloCelerisSayHelloTransaction(params).transactionKind);
 
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {

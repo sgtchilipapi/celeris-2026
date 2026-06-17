@@ -11,6 +11,7 @@ describe("getWebRuntimeConfig", () => {
           NEXT_PUBLIC_DEVELOPER_APP_ORIGIN: "http://localhost:3101",
           NEXT_PUBLIC_DEMO_FRONTEND_ORIGIN: "http://localhost:3101",
           NEXT_PUBLIC_HOSTED_AUTH_ORIGIN: "http://localhost:3101",
+          NEXT_PUBLIC_SUI_RPC_ORIGIN: "https://fullnode.testnet.sui.io:443",
           NEXT_PUBLIC_DEMO_APP_ID: ""
         },
         "auth.celeris.pro"
@@ -19,7 +20,8 @@ describe("getWebRuntimeConfig", () => {
       NEXT_PUBLIC_API_ORIGIN: "https://api.celeris.pro",
       NEXT_PUBLIC_DEVELOPER_APP_ORIGIN: "https://app.celeris.pro",
       NEXT_PUBLIC_DEMO_FRONTEND_ORIGIN: "https://demo.celeris.pro",
-      NEXT_PUBLIC_HOSTED_AUTH_ORIGIN: "https://auth.celeris.pro"
+      NEXT_PUBLIC_HOSTED_AUTH_ORIGIN: "https://auth.celeris.pro",
+      NEXT_PUBLIC_SUI_RPC_ORIGIN: "https://fullnode.testnet.sui.io:443"
     });
   });
 });

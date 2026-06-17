@@ -6,7 +6,8 @@ const tunnelRuntimeConfig = {
   NEXT_PUBLIC_API_ORIGIN: "https://api.celeris.pro",
   NEXT_PUBLIC_DEVELOPER_APP_ORIGIN: "https://app.celeris.pro",
   NEXT_PUBLIC_DEMO_FRONTEND_ORIGIN: "https://demo.celeris.pro",
-  NEXT_PUBLIC_HOSTED_AUTH_ORIGIN: "https://auth.celeris.pro"
+  NEXT_PUBLIC_HOSTED_AUTH_ORIGIN: "https://auth.celeris.pro",
+  NEXT_PUBLIC_SUI_RPC_ORIGIN: "https://fullnode.testnet.sui.io:443"
 } as const;
 
 function isLocalOrigin(value: string) {
@@ -36,7 +37,8 @@ export function normalizeWebRuntimeConfigForHost(config: WebRuntimeConfig, hostn
       : config.NEXT_PUBLIC_DEMO_FRONTEND_ORIGIN,
     NEXT_PUBLIC_HOSTED_AUTH_ORIGIN: isLocalOrigin(config.NEXT_PUBLIC_HOSTED_AUTH_ORIGIN)
       ? tunnelRuntimeConfig.NEXT_PUBLIC_HOSTED_AUTH_ORIGIN
-      : config.NEXT_PUBLIC_HOSTED_AUTH_ORIGIN
+      : config.NEXT_PUBLIC_HOSTED_AUTH_ORIGIN,
+    NEXT_PUBLIC_SUI_RPC_ORIGIN: config.NEXT_PUBLIC_SUI_RPC_ORIGIN
   };
 }
 

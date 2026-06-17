@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { createCelerisBrowserClient } from "@celeris/sdk-browser";
-import { CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO, type AppBalance, type AppCatalog, type AuthSession } from "@celeris/shared";
+import {
+  CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
+  type AppBalance,
+  type AppCatalog,
+  type AppTransactionRecord,
+  type AuthSession
+} from "@celeris/shared";
 
 const demoAppIdStorageKey = "celeris.demo.appId";
 
@@ -11,6 +17,7 @@ interface DemoConsumerShellProps {
   apiOrigin: string;
   hostedAuthOrigin: string;
   demoFrontendOrigin: string;
+  suiRpcOrigin: string;
   initialAppId?: string;
 }
 
@@ -22,6 +29,7 @@ export function DemoConsumerShell({
   apiOrigin,
   hostedAuthOrigin,
   demoFrontendOrigin,
+  suiRpcOrigin,
   initialAppId = ""
 }: DemoConsumerShellProps) {
   const [appId, setAppId] = useState(initialAppId);
@@ -32,6 +40,8 @@ export function DemoConsumerShell({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [checkoutCredits, setCheckoutCredits] = useState(100);
+  const [username, setUsername] = useState("");
+  const [transactions, setTransactions] = useState<AppTransactionRecord[]>([]);
 
   const client = useMemo(
     () =>
@@ -40,10 +50,11 @@ export function DemoConsumerShell({
             appId,
             apiOrigin,
             hostedAuthOrigin,
+            suiRpcOrigin,
             redirectUri: new URL("/auth/callback", demoFrontendOrigin).toString()
           })
         : null,
-    [apiOrigin, appId, demoFrontendOrigin, hostedAuthOrigin]
+    [apiOrigin, appId, demoFrontendOrigin, hostedAuthOrigin, suiRpcOrigin]
   );
 
   useEffect(() => {
@@ -61,9 +72,14 @@ export function DemoConsumerShell({
 
     void (async () => {
       try {
-        const [currentSession, currentCatalog] = await Promise.all([client.auth.getSession(), client.apps.getCatalog()]);
+        const [currentSession, currentCatalog, currentTransactions] = await Promise.all([
+          client.auth.getSession(),
+          client.apps.getCatalog(),
+          client.transactions.list()
+        ]);
         setSession(currentSession);
         setCatalog(currentCatalog);
+        setTransactions(currentTransactions);
         setStatusMessage(currentSession ? "Signed in to the demo app." : "Ready for demo sign-in.");
         if (currentSession) {
           setBalance(await client.credits.getBalance());
@@ -122,6 +138,7 @@ export function DemoConsumerShell({
       await client.auth.signOut();
       setSession(null);
       setBalance(null);
+      setTransactions(await client.transactions.list());
       setStatusMessage("Signed out.");
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
@@ -149,6 +166,30 @@ export function DemoConsumerShell({
       });
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
+      setIsBusy(false);
+    }
+  }
+
+  async function handleSayHello(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!client || !session) {
+      setErrorMessage("Sign in before executing say_hello.");
+      return;
+    }
+
+    setIsBusy(true);
+    setErrorMessage(null);
+
+    try {
+      const result = await client.actions.sayHello({ username });
+      setBalance(result.balance);
+      setTransactions(await client.transactions.list());
+      setStatusMessage(`Submitted ${result.message}`);
+      setUsername("");
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
       setIsBusy(false);
     }
   }
@@ -257,6 +298,51 @@ export function DemoConsumerShell({
               Buy credits
             </button>
           </form>
+        </section>
+
+        <section className="workspace-band">
+          <div className="band-header">
+            <div>
+              <h2>Say Hello</h2>
+              <p>Execute the configured sponsored action with demo credits.</p>
+            </div>
+          </div>
+          <form className="form-grid compact" onSubmit={handleSayHello}>
+            <label>
+              <span>Username</span>
+              <input
+                maxLength={32}
+                onChange={(event) => setUsername(event.target.value)}
+                type="text"
+                value={username}
+              />
+            </label>
+            <button className="button" disabled={isBusy || !session || !sayHelloAction} type="submit">
+              Say Hello Celeris
+            </button>
+          </form>
+        </section>
+
+        <section className="workspace-band">
+          <div className="band-header">
+            <div>
+              <h2>Feed</h2>
+              <p>Newest managed transactions for this app.</p>
+            </div>
+          </div>
+          <div className="list-stack">
+            {transactions.length > 0 ? (
+              transactions.map((transaction) => (
+                <a className="list-row" href={transaction.explorerUrl} key={transaction.transactionId}>
+                  <strong>{transaction.message}</strong>
+                  <small>{transaction.digest}</small>
+                  <small>{transaction.walletAddress}</small>
+                </a>
+              ))
+            ) : (
+              <p className="empty-state">No transactions recorded yet.</p>
+            )}
+          </div>
         </section>
       </section>
 
