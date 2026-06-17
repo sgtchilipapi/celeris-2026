@@ -14,8 +14,8 @@ export function badRequest(message: string, details?: unknown) {
   return new HttpError(400, message, details);
 }
 
-export function unauthorized(message = "Unauthorized") {
-  return new HttpError(401, message);
+export function unauthorized(message = "Unauthorized", details?: unknown) {
+  return new HttpError(401, message, details);
 }
 
 export function forbidden(message = "Forbidden") {
@@ -28,4 +28,8 @@ export function notFound(message = "Not Found") {
 
 export function conflict(message: string, details?: unknown) {
   return new HttpError(409, message, details);
+}
+
+export function badGateway(message: string, details?: unknown) {
+  return new HttpError(502, message, details);
 }

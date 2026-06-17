@@ -27,7 +27,7 @@ import {
   deriveZkLoginSalt,
   deriveZkLoginWalletAddress
 } from "@celeris/shared";
-import { badRequest, conflict, notFound, unauthorized } from "../../lib/http-error";
+import { badGateway, badRequest, conflict, notFound, unauthorized } from "../../lib/http-error";
 import { encryptSecret, generateOpaqueToken, sha256 } from "./crypto";
 import type {
   AuthLoginRequestRecord,
@@ -45,6 +45,7 @@ import { createPrismaDeveloperSetupRepository } from "./repository";
 const USER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LOGIN_REQUEST_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_DASHBOARD_ZKLOGIN_MAX_EPOCH = 2;
+const ZKLOGIN_SALT_UPPER_BOUND = 2n ** 128n;
 const zGoogleCallbackSchema = z.object({
   code: z.string().min(1),
   state: z.string().min(1)
@@ -92,6 +93,14 @@ export interface DeveloperSetupServiceOptions {
   googleOAuthClient?: GoogleOAuthClient;
   zkLoginProver?: ZkLoginProver;
   allowTestIdentityCompletion?: boolean;
+}
+
+function requireOption(value: string | number | undefined, label: string) {
+  if (value === undefined || value === null || value === "") {
+    throw new Error(`${label} is required`);
+  }
+
+  return value;
 }
 
 function toIsoString(value: Date) {
@@ -213,6 +222,48 @@ function parseProofInputs(value: string | null) {
   return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
 }
 
+function isValidZkLoginSalt(value: string) {
+  try {
+    const salt = BigInt(value);
+    return salt >= 0n && salt < ZKLOGIN_SALT_UPPER_BOUND;
+  } catch {
+    return false;
+  }
+}
+
+function getFetchFailureDetails(error: unknown) {
+  const cause = error instanceof Error ? error.cause : undefined;
+  const causeRecord = cause && typeof cause === "object" ? (cause as Record<string, unknown>) : null;
+
+  return {
+    error: error instanceof Error ? error.message : String(error),
+    causeCode: typeof causeRecord?.code === "string" ? causeRecord.code : null,
+    causeSyscall: typeof causeRecord?.syscall === "string" ? causeRecord.syscall : null,
+    causeHostname: typeof causeRecord?.hostname === "string" ? causeRecord.hostname : null
+  };
+}
+
+async function getResponseErrorDetails(response: Response) {
+  const contentType = response.headers.get("content-type");
+  const body = await response.text();
+  let parsed: unknown = null;
+
+  if (body) {
+    try {
+      parsed = JSON.parse(body) as unknown;
+    } catch {
+      parsed = body.slice(0, 500);
+    }
+  }
+
+  return {
+    upstreamStatusCode: response.status,
+    upstreamStatusText: response.statusText,
+    upstreamContentType: contentType,
+    upstreamBody: parsed
+  };
+}
+
 type AppConsumerSession = Pick<AuthSession, "clientKind" | "appId"> & {
   user: Pick<AuthSession["user"], "walletAddress">;
 };
@@ -256,6 +307,8 @@ class RuntimeGoogleOAuthClient implements GoogleOAuthClient {
         redirect_uri: this.options.redirectUri,
         grant_type: "authorization_code"
       })
+    }).catch((error: unknown) => {
+      throw badGateway("Google OAuth token exchange failed", getFetchFailureDetails(error));
     });
     const payload = (await response.json()) as { id_token?: unknown; error_description?: unknown };
 
@@ -271,7 +324,9 @@ class RuntimeGoogleOAuthClient implements GoogleOAuthClient {
   async verifyIdToken(idToken: string, expectedAudience: string) {
     const url = new URL("https://oauth2.googleapis.com/tokeninfo");
     url.searchParams.set("id_token", idToken);
-    const response = await fetch(url);
+    const response = await fetch(url).catch((error: unknown) => {
+      throw badGateway("Google ID token verification failed", getFetchFailureDetails(error));
+    });
     const payload = (await response.json()) as Record<string, unknown>;
 
     if (!response.ok) {
@@ -320,16 +375,23 @@ class RuntimeZkLoginProver implements ZkLoginProver {
       body: JSON.stringify({
         jwt: input.jwt,
         extendedEphemeralPublicKey: input.extendedEphemeralPublicKey,
-        maxEpoch: input.maxEpoch,
+        maxEpoch: String(input.maxEpoch),
         jwtRandomness: input.jwtRandomness,
         salt: input.salt,
         keyClaimName: "sub"
       })
+    }).catch((error: unknown) => {
+      throw badGateway("zkLogin prover request failed", getFetchFailureDetails(error));
     });
+
+    if (!response.ok) {
+      throw unauthorized("zkLogin prover rejected the Google identity", await getResponseErrorDetails(response));
+    }
+
     const payload = (await response.json()) as unknown;
 
-    if (!response.ok || !payload || typeof payload !== "object" || Array.isArray(payload)) {
-      throw unauthorized("zkLogin prover rejected the Google identity");
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw unauthorized("zkLogin prover returned an invalid response");
     }
 
     return payload as Record<string, unknown>;
@@ -358,20 +420,21 @@ export class DeveloperSetupService {
     this.hostedAuthOrigin = options.hostedAuthOrigin;
     this.developerAppOrigin = options.developerAppOrigin;
     this.demoFrontendOrigin = options.demoFrontendOrigin;
-    this.googleClientId = options.googleClientId ?? "development-google-client-id";
-    this.googleIssuer = options.googleIssuer ?? "https://accounts.google.com";
-    this.zkLoginSaltSeed = options.zkLoginSaltSeed ?? "development-celeris-zklogin-salt-seed";
+    this.googleClientId = String(requireOption(options.googleClientId, "googleClientId"));
+    this.googleIssuer = String(requireOption(options.googleIssuer, "googleIssuer"));
+    this.zkLoginSaltSeed = String(requireOption(options.zkLoginSaltSeed, "zkLoginSaltSeed"));
     this.zkLoginMaxEpochWindow = options.zkLoginMaxEpochWindow ?? DEFAULT_DASHBOARD_ZKLOGIN_MAX_EPOCH;
     this.googleOAuthClient =
       options.googleOAuthClient ??
       new RuntimeGoogleOAuthClient({
         clientId: this.googleClientId,
-        clientSecret: options.googleClientSecret ?? "development-google-client-secret",
-        redirectUri: options.googleRedirectUri ?? new URL("/v1/auth/google/callback", options.apiOrigin).toString(),
+        clientSecret: String(requireOption(options.googleClientSecret, "googleClientSecret")),
+        redirectUri: String(requireOption(options.googleRedirectUri, "googleRedirectUri")),
         issuer: this.googleIssuer
       });
     this.zkLoginProver =
-      options.zkLoginProver ?? new RuntimeZkLoginProver(options.zkLoginProverOrigin ?? "http://localhost:9000");
+      options.zkLoginProver ??
+      new RuntimeZkLoginProver(String(requireOption(options.zkLoginProverOrigin, "zkLoginProverOrigin")));
     this.allowTestIdentityCompletion = options.allowTestIdentityCompletion ?? false;
   }
 
@@ -860,16 +923,34 @@ export class DeveloperSetupService {
     const existing = await this.repository.findUserIdentityByIssuerSubject(identity.issuer, identity.subject);
 
     if (existing) {
+      if (!isValidZkLoginSalt(existing.salt)) {
+        const repaired = this.deriveUserZkLoginMaterial(identity);
+        return this.repository.updateUserIdentityZkLogin({
+          id: existing.id,
+          salt: repaired.salt,
+          walletAddress: repaired.walletAddress
+        });
+      }
+
       return existing;
     }
 
-    const salt = deriveZkLoginSalt(this.zkLoginSaltSeed, identity.issuer, identity.subject);
+    const zkLogin = this.deriveUserZkLoginMaterial(identity);
 
     return this.repository.createUserIdentity({
       issuer: identity.issuer,
       subject: identity.subject,
       email: identity.email,
       displayName: identity.displayName,
+      salt: zkLogin.salt,
+      walletAddress: zkLogin.walletAddress
+    });
+  }
+
+  private deriveUserZkLoginMaterial(identity: VerifiedGoogleIdentity) {
+    const salt = deriveZkLoginSalt(this.zkLoginSaltSeed, identity.issuer, identity.subject);
+
+    return {
       salt,
       walletAddress: deriveZkLoginWalletAddress({
         issuer: identity.issuer,
@@ -877,7 +958,7 @@ export class DeveloperSetupService {
         aud: identity.audience,
         salt
       })
-    });
+    };
   }
 
   private async resolveRequiredUserIdentityForRequest(request: AuthLoginRequestRecord) {

@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { createRequest, createResponse } from "node-mocks-http";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app";
 import { createInMemoryDeveloperSetupRepository } from "../src/features/developer/repository";
 import type { GoogleOAuthClient, VerifiedGoogleIdentity, ZkLoginProver } from "../src/features/developer/service";
@@ -10,6 +10,45 @@ import { unauthorized } from "../src/lib/http-error";
 const validPackageId = "0x2c45b9cf7d7c5fc33dbd0a1b5c14fffd7a74ac6f9ed6d7f2d881d7ec8e5a2011";
 const validAppStateObjectId = "0x6f5f67b135cb76aab0b0d3cf90a227ca31da93c1df2c0d0e42f7324de8f0fe21";
 const validAuthorityCapObjectId = "0x4d26b27a54c5539f84bd4597bc39ee03dd645f8924a914c1ef0b24f6bcf4ee81";
+const originalEnv = {
+  API_ORIGIN: process.env.API_ORIGIN,
+  CELERIS_APP_ENCRYPTION_KEY: process.env.CELERIS_APP_ENCRYPTION_KEY,
+  CELERIS_DEVELOPER_APP_ORIGIN: process.env.CELERIS_DEVELOPER_APP_ORIGIN,
+  CELERIS_DEMO_FRONTEND_ORIGIN: process.env.CELERIS_DEMO_FRONTEND_ORIGIN,
+  CELERIS_HOSTED_AUTH_ORIGIN: process.env.CELERIS_HOSTED_AUTH_ORIGIN,
+  CELERIS_GOOGLE_CLIENT_ID: process.env.CELERIS_GOOGLE_CLIENT_ID,
+  CELERIS_GOOGLE_CLIENT_SECRET: process.env.CELERIS_GOOGLE_CLIENT_SECRET,
+  CELERIS_GOOGLE_REDIRECT_URI: process.env.CELERIS_GOOGLE_REDIRECT_URI,
+  CELERIS_GOOGLE_ISSUER: process.env.CELERIS_GOOGLE_ISSUER,
+  CELERIS_ZKLOGIN_SALT_SEED: process.env.CELERIS_ZKLOGIN_SALT_SEED,
+  CELERIS_ZKLOGIN_PROVER_ORIGIN: process.env.CELERIS_ZKLOGIN_PROVER_ORIGIN,
+  CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW: process.env.CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW
+};
+
+function setRequiredApiEnv() {
+  process.env.API_ORIGIN = "http://localhost:4100";
+  process.env.CELERIS_APP_ENCRYPTION_KEY = "test-encryption-key-0123456789";
+  process.env.CELERIS_DEVELOPER_APP_ORIGIN = "http://localhost:3102";
+  process.env.CELERIS_DEMO_FRONTEND_ORIGIN = "http://localhost:3103";
+  process.env.CELERIS_HOSTED_AUTH_ORIGIN = "http://localhost:3101";
+  process.env.CELERIS_GOOGLE_CLIENT_ID = "google-client-id";
+  process.env.CELERIS_GOOGLE_CLIENT_SECRET = "google-client-secret";
+  process.env.CELERIS_GOOGLE_REDIRECT_URI = "http://localhost:4100/v1/auth/google/callback";
+  process.env.CELERIS_GOOGLE_ISSUER = "https://accounts.google.com";
+  process.env.CELERIS_ZKLOGIN_SALT_SEED = "test-zklogin-salt-seed-0123456789";
+  process.env.CELERIS_ZKLOGIN_PROVER_ORIGIN = "http://localhost:9000";
+  process.env.CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW = "2";
+}
+
+function restoreEnv() {
+  for (const [key, value] of Object.entries(originalEnv)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+}
 
 function createMockGoogleOAuthClient(): GoogleOAuthClient {
   return {
@@ -187,7 +226,13 @@ describe("developer setup routes", () => {
   let app: ReturnType<typeof createTestHarness>;
 
   beforeEach(() => {
+    setRequiredApiEnv();
     app = createTestHarness();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    restoreEnv();
   });
 
   it("supports shared-auth dashboard sign-in plus app create/list/get", async () => {
@@ -440,6 +485,181 @@ describe("developer setup routes", () => {
 
     expect(invalidState.statusCode).toBe(401);
     expect(invalidToken.statusCode).toBe(401);
+  });
+
+  it("serializes runtime zkLogin prover requests with prover-compatible field types", async () => {
+    let proverRequestBody: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      proverRequestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          proofPoints: {
+            a: ["1", "2", "1"],
+            b: [
+              ["1", "2"],
+              ["3", "4"],
+              ["1", "0"]
+            ],
+            c: ["1", "2", "1"]
+          },
+          issBase64Details: {
+            value: "mock",
+            indexMod4: 0
+          },
+          headerBase64: "mock"
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runtimeProverApp = createApp({
+      service: createDeveloperSetupService({
+        repository: createInMemoryDeveloperSetupRepository(),
+        encryptionKey: "test-encryption-key-0123456789",
+        apiOrigin: "http://localhost:4100",
+        hostedAuthOrigin: "http://localhost:3101",
+        developerAppOrigin: "http://localhost:3102",
+        demoFrontendOrigin: "http://localhost:3103",
+        googleClientId: "google-client-id",
+        googleClientSecret: "google-client-secret",
+        googleRedirectUri: "http://localhost:4100/v1/auth/google/callback",
+        googleIssuer: "https://accounts.google.com",
+        zkLoginSaltSeed: "test-zklogin-salt-seed-0123456789",
+        zkLoginProverOrigin: "http://localhost:9000",
+        googleOAuthClient: createMockGoogleOAuthClient()
+      })
+    });
+    const dashboardToken = await authenticateDashboard(runtimeProverApp);
+    const createAppResponse = await requestJson(runtimeProverApp, {
+      method: "POST",
+      url: "/v1/developer/apps",
+      token: dashboardToken,
+      body: {
+        name: "Runtime Prover App"
+      }
+    });
+    const appId = createAppResponse.json.app.appId as string;
+    const loginRequest = await requestJson(runtimeProverApp, {
+      method: "POST",
+      url: "/v1/auth/login-requests",
+      body: {
+        clientKind: "app_consumer",
+        clientId: appId,
+        appId,
+        redirectUri: "http://localhost:3103/auth/callback",
+        zkLogin: {
+          nonce: "consumer-nonce",
+          extendedEphemeralPublicKey: "extended-public-key",
+          maxEpoch: 9,
+          jwtRandomness: "123"
+        }
+      }
+    });
+    const googleStart = await requestJson(runtimeProverApp, {
+      method: "GET",
+      url: `/v1/auth/google/start?loginRequestId=${loginRequest.json.loginRequest.loginRequestId}`
+    });
+    const googleUrl = new URL(googleStart.redirectUrl);
+    const googleCallback = await requestJson(runtimeProverApp, {
+      method: "GET",
+      url: `/v1/auth/google/callback?code=runtime:${googleUrl.searchParams.get("nonce")}&state=${googleUrl.searchParams.get("state")}`
+    });
+
+    expect(googleCallback.statusCode).toBe(302);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0].toString()).toBe("http://localhost:9000/v1");
+    expect(proverRequestBody).not.toBeNull();
+    const sentProverRequestBody = proverRequestBody as unknown as Record<string, unknown>;
+    expect(sentProverRequestBody).toMatchObject({
+      jwt: "id-token:runtime:consumer-nonce",
+      extendedEphemeralPublicKey: "extended-public-key",
+      maxEpoch: "9",
+      jwtRandomness: "123",
+      keyClaimName: "sub"
+    });
+    expect(typeof sentProverRequestBody.salt).toBe("string");
+  });
+
+  it("repairs legacy oversized zkLogin salts before requesting a proof", async () => {
+    const repository = createInMemoryDeveloperSetupRepository();
+    const legacySalt = "545537731744415862780608209056738842689024020741918534729249112830043253547";
+    await repository.createUserIdentity({
+      issuer: "https://accounts.google.com",
+      subject: "legacy",
+      email: "legacy@example.com",
+      displayName: "Legacy User",
+      salt: legacySalt,
+      walletAddress: validPackageId
+    });
+    const appRecord = await repository.createApp({
+      developerProfileId: "profile_legacy",
+      name: "Legacy Salt App",
+      slug: "legacy-salt-app",
+      allowedChainId: "sui:testnet",
+      authProvider: "zklogin"
+    });
+    let proverSalt: string | null = null;
+    const service = createDeveloperSetupService({
+      repository,
+      encryptionKey: "test-encryption-key-0123456789",
+      apiOrigin: "http://localhost:4100",
+      hostedAuthOrigin: "http://localhost:3101",
+      developerAppOrigin: "http://localhost:3102",
+      demoFrontendOrigin: "http://localhost:3103",
+      googleClientId: "google-client-id",
+      googleClientSecret: "google-client-secret",
+      googleRedirectUri: "http://localhost:4100/v1/auth/google/callback",
+      googleIssuer: "https://accounts.google.com",
+      zkLoginSaltSeed: "test-zklogin-salt-seed-0123456789",
+      zkLoginProverOrigin: "http://localhost:9000",
+      googleOAuthClient: createMockGoogleOAuthClient(),
+      zkLoginProver: {
+        async requestProof(input) {
+          proverSalt = input.salt;
+          return {
+            proof: "mock-proof"
+          };
+        }
+      }
+    });
+    const legacySaltApp = createApp({ service });
+    const loginRequest = await requestJson(legacySaltApp, {
+      method: "POST",
+      url: "/v1/auth/login-requests",
+      body: {
+        clientKind: "app_consumer",
+        clientId: appRecord.app.id,
+        appId: appRecord.app.id,
+        redirectUri: "http://localhost:3103/auth/callback",
+        zkLogin: {
+          nonce: "consumer-nonce",
+          extendedEphemeralPublicKey: "extended-public-key",
+          maxEpoch: 9,
+          jwtRandomness: "123"
+        }
+      }
+    });
+    const googleStart = await requestJson(legacySaltApp, {
+      method: "GET",
+      url: `/v1/auth/google/start?loginRequestId=${loginRequest.json.loginRequest.loginRequestId}`
+    });
+    const googleUrl = new URL(googleStart.redirectUrl);
+    const googleCallback = await requestJson(legacySaltApp, {
+      method: "GET",
+      url: `/v1/auth/google/callback?code=legacy:${googleUrl.searchParams.get("nonce")}&state=${googleUrl.searchParams.get("state")}`
+    });
+    const repairedIdentity = await repository.findUserIdentityByIssuerSubject("https://accounts.google.com", "legacy");
+
+    expect(googleCallback.statusCode).toBe(302);
+    expect(proverSalt).not.toBe(legacySalt);
+    expect(BigInt(proverSalt ?? "0")).toBeLessThan(2n ** 128n);
+    expect(repairedIdentity?.salt).toBe(proverSalt);
   });
 
   it("resolves the same verified Google subject to the same wallet across dashboard and app consumer auth", async () => {

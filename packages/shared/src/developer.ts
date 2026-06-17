@@ -278,9 +278,8 @@ export function deriveDeterministicWalletAddress(subject: string) {
 }
 
 export function deriveZkLoginSalt(seed: string, issuer: string, subject: string) {
-  const bn254FieldSize = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
-  const hash = createHash("sha256").update(`${seed}:${issuer}:${subject}`).digest("hex");
-  return (BigInt(`0x${hash}`) % bn254FieldSize).toString(10);
+  const hash = createHash("sha256").update(`${seed}:${issuer}:${subject}`).digest();
+  return BigInt(`0x${hash.subarray(0, 16).toString("hex")}`).toString(10);
 }
 
 export function deriveZkLoginWalletAddress(input: { issuer: string; subject: string; aud: string; salt: string }) {

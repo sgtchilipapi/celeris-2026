@@ -143,6 +143,12 @@ export interface CreateUserIdentityInput {
   walletAddress: string;
 }
 
+export interface UpdateUserIdentityZkLoginInput {
+  id: string;
+  salt: string;
+  walletAddress: string;
+}
+
 export interface UpsertDeveloperProfileInput {
   userIdentityId: string;
   email: string;
@@ -228,6 +234,7 @@ export interface DeveloperSetupRepository {
   findUserIdentityById(id: string): Promise<UserIdentityRecord | null>;
   findUserIdentityByIssuerSubject(issuer: string, subject: string): Promise<UserIdentityRecord | null>;
   createUserIdentity(input: CreateUserIdentityInput): Promise<UserIdentityRecord>;
+  updateUserIdentityZkLogin(input: UpdateUserIdentityZkLoginInput): Promise<UserIdentityRecord>;
   upsertDeveloperProfile(input: UpsertDeveloperProfileInput): Promise<DeveloperProfileRecord>;
   findDeveloperProfileById(id: string): Promise<DeveloperProfileRecord | null>;
   createAuthLoginRequest(input: CreateAuthLoginRequestInput): Promise<AuthLoginRequestRecord>;
@@ -315,6 +322,17 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
     async createUserIdentity(input) {
       return prisma.userIdentity.create({
         data: input
+      });
+    },
+    async updateUserIdentityZkLogin(input) {
+      return prisma.userIdentity.update({
+        where: {
+          id: input.id
+        },
+        data: {
+          salt: input.salt,
+          walletAddress: input.walletAddress
+        }
       });
     },
     async upsertDeveloperProfile(input) {
@@ -721,6 +739,22 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
       userIdentities.set(record.id, record);
       userIdentityKeys.set(`${record.issuer}:${record.subject}`, record.id);
       return record;
+    },
+    async updateUserIdentityZkLogin(input) {
+      const existing = userIdentities.get(input.id);
+
+      if (!existing) {
+        throw new Error("User identity not found");
+      }
+
+      const updated = {
+        ...existing,
+        salt: input.salt,
+        walletAddress: input.walletAddress,
+        updatedAt: new Date()
+      };
+      userIdentities.set(updated.id, updated);
+      return updated;
     },
     async upsertDeveloperProfile(input) {
       const existing = developerProfilesByIdentityId.get(input.userIdentityId);

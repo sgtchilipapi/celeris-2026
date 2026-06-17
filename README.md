@@ -60,6 +60,15 @@ Fresh-start monorepo bootstrap for the Celeris MVP.
 - zkLogin salt is derived from `CELERIS_ZKLOGIN_SALT_SEED`, Google issuer, and Google subject, then used to derive the stable Sui wallet address.
 - Browser SDK auth creates zkLogin ephemeral key material in `sessionStorage` only and sends the nonce/public key/max epoch metadata in the login request.
 - The API calls `CELERIS_ZKLOGIN_PROVER_ORIGIN` during Google callback and returns the resulting proof inputs in the issued session.
+- The zkLogin prover is an external runtime dependency. This repo does not build or run it for you.
+- User sign-in now fails closed if the Google OAuth or zkLogin prover env values are missing. There is no implicit in-repo runtime fallback for production-style auth.
+
+## Local Auth Runtime
+
+- Copy `.env.example` to `.env.local` and set the Google OAuth and zkLogin values explicitly.
+- `CELERIS_GOOGLE_REDIRECT_URI` must point at `GET /v1/auth/google/callback` on the API origin you are actually serving.
+- `CELERIS_ZKLOGIN_PROVER_ORIGIN` must point at a reachable prover process before demo user sign-in can complete.
+- Tests can still inject mock Google/prover adapters directly, but the runtime API path now requires explicit env configuration.
 
 ## Cloudflare Tunnel Dev Routing
 

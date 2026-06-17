@@ -7,39 +7,20 @@ export const apiEnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(4100),
   API_ORIGIN: z.string().url().default("http://localhost:4100"),
-  CELERIS_APP_ENCRYPTION_KEY: z.string().min(16).default("development-celeris-app-encryption-key"),
+  CELERIS_APP_ENCRYPTION_KEY: z.string().min(16, "CELERIS_APP_ENCRYPTION_KEY is required"),
   CELERIS_DEVELOPER_APP_ORIGIN: z.string().url().default("http://localhost:3101"),
   CELERIS_DEMO_FRONTEND_ORIGIN: z.string().url().default("http://localhost:3101"),
   CELERIS_HOSTED_AUTH_ORIGIN: z.string().url().default("http://localhost:3101"),
-  CELERIS_GOOGLE_CLIENT_ID: z.string().min(1).default("development-google-client-id"),
-  CELERIS_GOOGLE_CLIENT_SECRET: z.string().min(1).default("development-google-client-secret"),
-  CELERIS_GOOGLE_REDIRECT_URI: z.string().url().default("http://localhost:4100/v1/auth/google/callback"),
-  CELERIS_GOOGLE_ISSUER: z.string().min(1).default("https://accounts.google.com"),
-  CELERIS_ZKLOGIN_SALT_SEED: z.string().min(16).default("development-celeris-zklogin-salt-seed"),
-  CELERIS_ZKLOGIN_PROVER_ORIGIN: z.string().url().default("http://localhost:9000"),
-  CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW: z.coerce.number().int().positive().default(2)
-}).superRefine((value, context) => {
-  if (value.NODE_ENV !== "production") {
-    return;
-  }
-
-  const productionRequiredFields = [
-    "CELERIS_GOOGLE_CLIENT_ID",
-    "CELERIS_GOOGLE_CLIENT_SECRET",
-    "CELERIS_GOOGLE_REDIRECT_URI",
-    "CELERIS_ZKLOGIN_SALT_SEED",
-    "CELERIS_ZKLOGIN_PROVER_ORIGIN"
-  ] as const;
-
-  for (const field of productionRequiredFields) {
-    if (value[field].startsWith("development-") || value[field].includes("localhost")) {
-      context.addIssue({
-        code: "custom",
-        path: [field],
-        message: `${field} must be explicitly configured in production`
-      });
-    }
-  }
+  CELERIS_GOOGLE_CLIENT_ID: z.string().min(1, "CELERIS_GOOGLE_CLIENT_ID is required"),
+  CELERIS_GOOGLE_CLIENT_SECRET: z.string().min(1, "CELERIS_GOOGLE_CLIENT_SECRET is required"),
+  CELERIS_GOOGLE_REDIRECT_URI: z.string().url("CELERIS_GOOGLE_REDIRECT_URI must be a valid URL"),
+  CELERIS_GOOGLE_ISSUER: z.string().min(1, "CELERIS_GOOGLE_ISSUER is required"),
+  CELERIS_ZKLOGIN_SALT_SEED: z.string().min(16, "CELERIS_ZKLOGIN_SALT_SEED is required"),
+  CELERIS_ZKLOGIN_PROVER_ORIGIN: z.string().url("CELERIS_ZKLOGIN_PROVER_ORIGIN must be a valid URL"),
+  CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW: z.coerce
+    .number()
+    .int()
+    .positive("CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW must be a positive integer")
 });
 
 export const webEnvSchema = z.object({
