@@ -108,6 +108,19 @@ export interface ManagedActionRecord {
   updatedAt: Date;
 }
 
+export interface CheckoutSessionRecord {
+  id: string;
+  appId: string;
+  walletAddress: string;
+  chainId: string;
+  credits: number;
+  status: string;
+  successRedirectUrl: string;
+  cancelRedirectUrl: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface DeveloperAppAggregateRecord {
   app: AppRecord;
   sponsorWallet: SponsorWalletRecord | null;
@@ -196,6 +209,21 @@ export interface UpsertManagedActionInput {
   isEnabled: boolean;
 }
 
+export interface CreateCheckoutSessionRecordInput {
+  appId: string;
+  walletAddress: string;
+  chainId: string;
+  credits: number;
+  successRedirectUrl: string;
+  cancelRedirectUrl: string;
+}
+
+export interface CompleteCheckoutSessionRecordInput {
+  appId: string;
+  walletAddress: string;
+  checkoutSessionId: string;
+}
+
 export interface DeveloperSetupRepository {
   findUserIdentityById(id: string): Promise<UserIdentityRecord | null>;
   findUserIdentityByIssuerSubject(issuer: string, subject: string): Promise<UserIdentityRecord | null>;
@@ -219,6 +247,10 @@ export interface DeveloperSetupRepository {
   upsertRegisteredProgram(input: UpsertRegisteredProgramInput): Promise<RegisteredProgramRecord>;
   findRegisteredProgramByAppId(appId: string): Promise<RegisteredProgramRecord | null>;
   upsertManagedAction(input: UpsertManagedActionInput): Promise<ManagedActionRecord>;
+  createCheckoutSession(input: CreateCheckoutSessionRecordInput): Promise<CheckoutSessionRecord>;
+  findCheckoutSessionById(appId: string, checkoutSessionId: string): Promise<CheckoutSessionRecord | null>;
+  completeCheckoutSession(input: CompleteCheckoutSessionRecordInput): Promise<CheckoutSessionRecord | null>;
+  getCreditBalance(appId: string, walletAddress: string): Promise<number>;
 }
 
 function extractSayHelloAction(actions: ManagedActionRecord[]) {
@@ -545,6 +577,86 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
           isEnabled: input.isEnabled
         }
       });
+    },
+    async createCheckoutSession(input) {
+      return prisma.checkoutSession.create({
+        data: {
+          appId: input.appId,
+          walletAddress: input.walletAddress,
+          chainId: input.chainId,
+          credits: input.credits,
+          status: "pending",
+          successRedirectUrl: input.successRedirectUrl,
+          cancelRedirectUrl: input.cancelRedirectUrl
+        }
+      });
+    },
+    async findCheckoutSessionById(appId, checkoutSessionId) {
+      return prisma.checkoutSession.findFirst({
+        where: {
+          id: checkoutSessionId,
+          appId
+        }
+      });
+    },
+    async completeCheckoutSession(input) {
+      return prisma.$transaction(async (tx) => {
+        const checkoutSession = await tx.checkoutSession.findFirst({
+          where: {
+            id: input.checkoutSessionId,
+            appId: input.appId,
+            walletAddress: input.walletAddress
+          }
+        });
+
+        if (!checkoutSession) {
+          return null;
+        }
+
+        const completed =
+          checkoutSession.status === "completed"
+            ? checkoutSession
+            : await tx.checkoutSession.update({
+                where: { id: checkoutSession.id },
+                data: { status: "completed" }
+              });
+
+        await tx.creditLedgerEntry.upsert({
+          where: {
+            appId_referenceType_referenceId_reason: {
+              appId: checkoutSession.appId,
+              referenceType: "checkout_session",
+              referenceId: checkoutSession.id,
+              reason: "purchase"
+            }
+          },
+          update: {},
+          create: {
+            appId: checkoutSession.appId,
+            walletAddress: checkoutSession.walletAddress,
+            chainId: checkoutSession.chainId,
+            deltaCredits: checkoutSession.credits,
+            reason: "purchase",
+            referenceType: "checkout_session",
+            referenceId: checkoutSession.id
+          }
+        });
+
+        return completed;
+      });
+    },
+    async getCreditBalance(appId, walletAddress) {
+      const aggregate = await prisma.creditLedgerEntry.aggregate({
+        where: {
+          appId,
+          walletAddress
+        },
+        _sum: {
+          deltaCredits: true
+        }
+      });
+
+      return aggregate._sum.deltaCredits ?? 0;
     }
   };
 }
@@ -561,6 +673,15 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
   const sponsorWalletsByAppId = new Map<string, SponsorWalletRecord>();
   const programsByAppId = new Map<string, RegisteredProgramRecord>();
   const actionsByAppId = new Map<string, ManagedActionRecord>();
+  const checkoutSessions = new Map<string, CheckoutSessionRecord>();
+  const ledgerEntriesByReference = new Map<
+    string,
+    {
+      appId: string;
+      walletAddress: string;
+      deltaCredits: number;
+    }
+  >();
 
   function makeId(prefix: string) {
     return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -814,6 +935,64 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
 
       actionsByAppId.set(input.appId, record);
       return record;
+    },
+    async createCheckoutSession(input) {
+      const now = new Date();
+      const record: CheckoutSessionRecord = {
+        id: makeId("checkout"),
+        appId: input.appId,
+        walletAddress: input.walletAddress,
+        chainId: input.chainId,
+        credits: input.credits,
+        status: "pending",
+        successRedirectUrl: input.successRedirectUrl,
+        cancelRedirectUrl: input.cancelRedirectUrl,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      checkoutSessions.set(record.id, record);
+      return record;
+    },
+    async findCheckoutSessionById(appId, checkoutSessionId) {
+      const record = checkoutSessions.get(checkoutSessionId);
+      return record?.appId === appId ? record : null;
+    },
+    async completeCheckoutSession(input) {
+      const existing = checkoutSessions.get(input.checkoutSessionId);
+
+      if (!existing || existing.appId !== input.appId || existing.walletAddress !== input.walletAddress) {
+        return null;
+      }
+
+      const completed: CheckoutSessionRecord = {
+        ...existing,
+        status: "completed",
+        updatedAt: new Date()
+      };
+      checkoutSessions.set(completed.id, completed);
+
+      const ledgerKey = `${completed.appId}:checkout_session:${completed.id}:purchase`;
+      if (!ledgerEntriesByReference.has(ledgerKey)) {
+        ledgerEntriesByReference.set(ledgerKey, {
+          appId: completed.appId,
+          walletAddress: completed.walletAddress,
+          deltaCredits: completed.credits
+        });
+      }
+
+      return completed;
+    },
+    async getCreditBalance(appId, walletAddress) {
+      let balance = 0;
+
+      for (const entry of ledgerEntriesByReference.values()) {
+        if (entry.appId === appId && entry.walletAddress === walletAddress) {
+          balance += entry.deltaCredits;
+        }
+      }
+
+      return balance;
     }
   };
 }

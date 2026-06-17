@@ -1,9 +1,16 @@
 import {
   CELERIS_AUTH_CLIENT_KIND_APP_CONSUMER,
+  appBalanceResponseSchema,
+  appCatalogResponseSchema,
   authLoginRequestResponseSchema,
   authSessionResponseSchema,
+  checkoutSessionResponseSchema,
+  completeCheckoutSessionResponseSchema,
+  type AppBalance,
+  type AppCatalog,
   type AuthLoginRequest,
-  type AuthSession
+  type AuthSession,
+  type CheckoutSession
 } from "@celeris/shared";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { generateNonce, generateRandomness, getExtendedEphemeralPublicKey } from "@mysten/sui/zklogin";
@@ -18,6 +25,13 @@ export interface CelerisBrowserClientConfig {
 
 export interface StartLoginOptions {
   redirect?: boolean;
+}
+
+export interface StartCheckoutOptions {
+  credits: number;
+  redirect?: boolean;
+  successRedirectUrl?: string;
+  cancelRedirectUrl?: string;
 }
 
 function notImplemented(methodName: string): never {
@@ -108,7 +122,37 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
     return session;
   }
 
-  return {
+  function readStoredSession() {
+    const stored = getSessionStorage().getItem(sessionStorageKey);
+    return stored ? authSessionResponseSchema.shape.session.parse(JSON.parse(stored)) : null;
+  }
+
+  async function requireStoredSession() {
+    const session = await client.auth.getSession();
+
+    if (!session) {
+      throw new Error("Celeris user session required");
+    }
+
+    return session;
+  }
+
+  async function requestAuthenticatedJson<T>(url: URL, init: RequestInit, parser: { parse: (value: unknown) => T }) {
+    const session = await requireStoredSession();
+    return requestJson(
+      url,
+      {
+        ...init,
+        headers: {
+          authorization: `Bearer ${session.token}`,
+          ...(init.headers ?? {})
+        }
+      },
+      parser
+    );
+  }
+
+  const client = {
     config,
     auth: {
       startLogin: async (options: StartLoginOptions = {}): Promise<AuthLoginRequest> => {
@@ -178,13 +222,11 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
         return storeSession(response.session);
       },
       getSession: async (): Promise<AuthSession | null> => {
-        const stored = getSessionStorage().getItem(sessionStorageKey);
+        const parsed = readStoredSession();
 
-        if (!stored) {
+        if (!parsed) {
           return null;
         }
-
-        const parsed = authSessionResponseSchema.shape.session.parse(JSON.parse(stored));
         const response = await fetch(new URL("/v1/me", config.apiOrigin), {
           headers: {
             authorization: `Bearer ${parsed.token}`
@@ -200,8 +242,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
         return storeSession(payload.session);
       },
       signOut: async (): Promise<void> => {
-        const stored = getSessionStorage().getItem(sessionStorageKey);
-        const parsed = stored ? authSessionResponseSchema.shape.session.parse(JSON.parse(stored)) : null;
+        const parsed = readStoredSession();
 
         if (parsed) {
           await fetch(new URL("/v1/auth/logout", config.apiOrigin), {
@@ -217,11 +258,57 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
       }
     },
     apps: {
-      getCatalog: async () => notImplemented("apps.getCatalog")
+      getCatalog: async (): Promise<AppCatalog> => {
+        const response = await requestJson(
+          new URL(`/v1/apps/${config.appId}/catalog`, config.apiOrigin),
+          {
+            method: "GET"
+          },
+          appCatalogResponseSchema
+        );
+        return response.catalog;
+      }
     },
     credits: {
-      getBalance: async () => notImplemented("credits.getBalance"),
-      startCheckout: async () => notImplemented("credits.startCheckout")
+      getBalance: async (): Promise<AppBalance> => {
+        const response = await requestAuthenticatedJson(
+          new URL(`/v1/apps/${config.appId}/balance`, config.apiOrigin),
+          {
+            method: "GET"
+          },
+          appBalanceResponseSchema
+        );
+        return response.balance;
+      },
+      startCheckout: async (options: StartCheckoutOptions): Promise<CheckoutSession> => {
+        const response = await requestAuthenticatedJson(
+          new URL(`/v1/apps/${config.appId}/checkout-sessions`, config.apiOrigin),
+          {
+            method: "POST",
+            body: JSON.stringify({
+              credits: options.credits,
+              successRedirectUrl: options.successRedirectUrl,
+              cancelRedirectUrl: options.cancelRedirectUrl
+            })
+          },
+          checkoutSessionResponseSchema
+        );
+
+        if (options.redirect !== false) {
+          window.location.href = response.checkoutSession.checkoutUrl;
+        }
+
+        return response.checkoutSession;
+      },
+      completeCheckout: async (checkoutSessionId: string): Promise<{ checkoutSession: CheckoutSession; balance: AppBalance }> => {
+        return requestAuthenticatedJson(
+          new URL(`/v1/apps/${config.appId}/checkout-sessions/${checkoutSessionId}/complete`, config.apiOrigin),
+          {
+            method: "POST"
+          },
+          completeCheckoutSessionResponseSchema
+        );
+      }
     },
     actions: {
       sayHello: async (_input: { username: string }) => notImplemented("actions.sayHello")
@@ -230,4 +317,6 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
       list: async () => notImplemented("transactions.list")
     }
   };
+
+  return client;
 }

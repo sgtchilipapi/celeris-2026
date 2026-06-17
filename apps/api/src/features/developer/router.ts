@@ -219,5 +219,36 @@ export function createDeveloperRouter(options?: DeveloperRouterOptions) {
     res.status(200).json({ sayHelloAction });
   });
 
+  router.get("/v1/apps/:appId/catalog", async (req, res) => {
+    const catalog = await resolveService().getCatalog(requireRouteParam(req.params.appId, "appId"));
+    res.status(200).json({ catalog });
+  });
+
+  router.get("/v1/apps/:appId/balance", userSession, async (req, res) => {
+    const balance = await resolveService().getBalance(
+      res.locals.userSession,
+      requireRouteParam(req.params.appId, "appId")
+    );
+    res.status(200).json({ balance });
+  });
+
+  router.post("/v1/apps/:appId/checkout-sessions", userSession, async (req, res) => {
+    const checkoutSession = await resolveService().createCheckoutSession(
+      res.locals.userSession,
+      requireRouteParam(req.params.appId, "appId"),
+      req.body
+    );
+    res.status(201).json({ checkoutSession });
+  });
+
+  router.post("/v1/apps/:appId/checkout-sessions/:checkoutSessionId/complete", userSession, async (req, res) => {
+    const result = await resolveService().completeCheckoutSession(
+      res.locals.userSession,
+      requireRouteParam(req.params.appId, "appId"),
+      requireRouteParam(req.params.checkoutSessionId, "checkoutSessionId")
+    );
+    res.status(200).json(result);
+  });
+
   return router;
 }

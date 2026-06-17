@@ -150,6 +150,39 @@ async function authenticateDashboard(app: ReturnType<typeof createTestHarness>, 
   return token.json.session.token as string;
 }
 
+async function authenticateConsumer(app: ReturnType<typeof createTestHarness>, appId: string, subject = "user") {
+  const loginRequest = await requestJson(app, {
+    method: "POST",
+    url: "/v1/auth/login-requests",
+    body: {
+      clientKind: "app_consumer",
+      clientId: appId,
+      appId,
+      redirectUri: "http://localhost:3103/auth/callback"
+    }
+  });
+  const googleStart = await requestJson(app, {
+    method: "GET",
+    url: `/v1/auth/google/start?loginRequestId=${loginRequest.json.loginRequest.loginRequestId}`
+  });
+  const googleUrl = new URL(googleStart.redirectUrl);
+  const googleCallback = await requestJson(app, {
+    method: "GET",
+    url: `/v1/auth/google/callback?code=${subject}:${googleUrl.searchParams.get("nonce")}&state=${googleUrl.searchParams.get("state")}`
+  });
+  const redirectUrl = new URL(googleCallback.redirectUrl);
+  const token = await requestJson(app, {
+    method: "POST",
+    url: "/v1/auth/token",
+    body: {
+      code: redirectUrl.searchParams.get("code"),
+      state: redirectUrl.searchParams.get("state")
+    }
+  });
+
+  return token.json.session.token as string;
+}
+
 describe("developer setup routes", () => {
   let app: ReturnType<typeof createTestHarness>;
 
@@ -273,6 +306,88 @@ describe("developer setup routes", () => {
     expect(me.json.session.zkLogin.proofInputs).toMatchObject({
       proof: "mock-proof"
     });
+  });
+
+  it("supports catalog, checkout completion, ledger-derived balance, and idempotent repeat completion", async () => {
+    const developerToken = await authenticateDashboard(app, "credits-owner@example.com");
+    const createAppResponse = await requestJson(app, {
+      method: "POST",
+      url: "/v1/developer/apps",
+      token: developerToken,
+      body: {
+        name: "Credits App"
+      }
+    });
+    const appId = createAppResponse.json.app.appId as string;
+    await requestJson(app, {
+      method: "PUT",
+      url: `/v1/developer/apps/${appId}/actions/say_hello`,
+      token: developerToken,
+      body: {
+        priceCredits: 7,
+        isEnabled: true
+      }
+    });
+    const consumerToken = await authenticateConsumer(app, appId);
+
+    const catalog = await requestJson(app, {
+      method: "GET",
+      url: `/v1/apps/${appId}/catalog`
+    });
+
+    expect(catalog.statusCode).toBe(200);
+    expect(catalog.json.catalog.actions).toEqual([
+      {
+        actionType: "say_hello",
+        priceCredits: 7,
+        isEnabled: true
+      }
+    ]);
+
+    const emptyBalance = await requestJson(app, {
+      method: "GET",
+      url: `/v1/apps/${appId}/balance`,
+      token: consumerToken
+    });
+
+    expect(emptyBalance.statusCode).toBe(200);
+    expect(emptyBalance.json.balance.availableCredits).toBe(0);
+
+    const checkout = await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${appId}/checkout-sessions`,
+      token: consumerToken,
+      body: {
+        credits: 100
+      }
+    });
+
+    expect(checkout.statusCode).toBe(201);
+    expect(checkout.json.checkoutSession).toMatchObject({
+      appId,
+      credits: 100,
+      status: "pending"
+    });
+    expect(checkout.json.checkoutSession.checkoutUrl).toContain("/checkout");
+
+    const complete = await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${appId}/checkout-sessions/${checkout.json.checkoutSession.checkoutSessionId}/complete`,
+      token: consumerToken
+    });
+
+    expect(complete.statusCode).toBe(200);
+    expect(complete.json.checkoutSession.status).toBe("completed");
+    expect(complete.json.balance.availableCredits).toBe(100);
+
+    const repeatComplete = await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${appId}/checkout-sessions/${checkout.json.checkoutSession.checkoutSessionId}/complete`,
+      token: consumerToken
+    });
+
+    expect(repeatComplete.statusCode).toBe(200);
+    expect(repeatComplete.json.balance.availableCredits).toBe(100);
   });
 
   it("keeps mock identity completion unreachable from the production auth route", async () => {

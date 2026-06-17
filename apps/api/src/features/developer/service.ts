@@ -8,6 +8,7 @@ import {
   CELERIS_CHAIN_FAMILY_SUI,
   CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
   CELERIS_NETWORK_TESTNET,
+  type AuthSession,
   authLoginCompletionSchema,
   authProviderSchema,
   authTokenExchangeSchema,
@@ -16,6 +17,8 @@ import {
   configureSayHelloSchema,
   type CreateAuthLoginRequestInput,
   createAuthLoginRequestSchema,
+  type CreateCheckoutSessionInput,
+  createCheckoutSessionSchema,
   type CreateDeveloperAppInput,
   createDeveloperAppSchema,
   type DeveloperApp,
@@ -28,6 +31,7 @@ import { badRequest, conflict, notFound, unauthorized } from "../../lib/http-err
 import { encryptSecret, generateOpaqueToken, sha256 } from "./crypto";
 import type {
   AuthLoginRequestRecord,
+  CheckoutSessionRecord,
   DeveloperAppAggregateRecord,
   DeveloperProfileRecord,
   ManagedActionRecord,
@@ -142,6 +146,14 @@ function toManagedAction(record: ManagedActionRecord) {
   };
 }
 
+function toCatalogAction(record: ManagedActionRecord) {
+  return {
+    actionType: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
+    priceCredits: record.priceCredits,
+    isEnabled: record.isEnabled
+  };
+}
+
 function toDeveloperApp(
   aggregate: DeveloperAppAggregateRecord,
   runtimeConfig: Pick<DeveloperSetupServiceOptions, "apiOrigin" | "hostedAuthOrigin" | "demoFrontendOrigin">
@@ -168,6 +180,15 @@ function toDeveloperApp(
   };
 }
 
+function toBalance(input: { appId: string; walletAddress: string; chainId: string; availableCredits: number }) {
+  return {
+    appId: input.appId,
+    walletAddress: input.walletAddress,
+    chainId: chainIdSchema.parse(input.chainId),
+    availableCredits: input.availableCredits
+  };
+}
+
 function slugifyName(name: string) {
   const base = name
     .trim()
@@ -191,6 +212,10 @@ function parseProofInputs(value: string | null) {
   const parsed = JSON.parse(value) as unknown;
   return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
 }
+
+type AppConsumerSession = Pick<AuthSession, "clientKind" | "appId"> & {
+  user: Pick<AuthSession["user"], "walletAddress">;
+};
 
 class RuntimeGoogleOAuthClient implements GoogleOAuthClient {
   constructor(
@@ -762,6 +787,75 @@ export class DeveloperSetupService {
     return toManagedAction(action);
   }
 
+  async getCatalog(appId: string) {
+    const app = await this.requirePublicApp(appId);
+
+    return {
+      appId: app.app.id,
+      chainId: chainIdSchema.parse(app.app.allowedChainId),
+      actions: app.sayHelloAction ? [toCatalogAction(app.sayHelloAction)] : []
+    };
+  }
+
+  async getBalance(session: AppConsumerSession, appId: string) {
+    const appConsumer = this.requireAppConsumerSession(session, appId);
+    await this.requirePublicApp(appId);
+    const availableCredits = await this.repository.getCreditBalance(appId, appConsumer.walletAddress);
+
+    return toBalance({
+      appId,
+      walletAddress: appConsumer.walletAddress,
+      chainId: appConsumer.chainId,
+      availableCredits
+    });
+  }
+
+  async createCheckoutSession(session: AppConsumerSession, appId: string, input: CreateCheckoutSessionInput) {
+    const appConsumer = this.requireAppConsumerSession(session, appId);
+    await this.requirePublicApp(appId);
+    const payload = createCheckoutSessionSchema.parse(input);
+    const defaultSuccessUrl = new URL("/", this.demoFrontendOrigin);
+    defaultSuccessUrl.searchParams.set("checkout", "success");
+    const defaultCancelUrl = new URL("/", this.demoFrontendOrigin);
+    defaultCancelUrl.searchParams.set("checkout", "canceled");
+    const checkoutSession = await this.repository.createCheckoutSession({
+      appId,
+      walletAddress: appConsumer.walletAddress,
+      chainId: appConsumer.chainId,
+      credits: payload.credits,
+      successRedirectUrl: payload.successRedirectUrl ?? defaultSuccessUrl.toString(),
+      cancelRedirectUrl: payload.cancelRedirectUrl ?? defaultCancelUrl.toString()
+    });
+
+    return this.toCheckoutSession(checkoutSession);
+  }
+
+  async completeCheckoutSession(session: AppConsumerSession, appId: string, checkoutSessionId: string) {
+    const appConsumer = this.requireAppConsumerSession(session, appId);
+    await this.requirePublicApp(appId);
+    const checkoutSession = await this.repository.completeCheckoutSession({
+      appId,
+      walletAddress: appConsumer.walletAddress,
+      checkoutSessionId
+    });
+
+    if (!checkoutSession) {
+      throw notFound("Checkout session not found");
+    }
+
+    const availableCredits = await this.repository.getCreditBalance(appId, appConsumer.walletAddress);
+
+    return {
+      checkoutSession: this.toCheckoutSession(checkoutSession),
+      balance: toBalance({
+        appId,
+        walletAddress: appConsumer.walletAddress,
+        chainId: appConsumer.chainId,
+        availableCredits
+      })
+    };
+  }
+
   private async resolveUserIdentity(identity: VerifiedGoogleIdentity) {
     const existing = await this.repository.findUserIdentityByIssuerSubject(identity.issuer, identity.subject);
 
@@ -828,6 +922,31 @@ export class DeveloperSetupService {
     return session;
   }
 
+  private requireAppConsumerSession(session: AppConsumerSession, appId: string) {
+    if (
+      session.clientKind !== CELERIS_AUTH_CLIENT_KIND_APP_CONSUMER ||
+      session.appId !== appId ||
+      !session.user.walletAddress
+    ) {
+      throw unauthorized("App consumer session required");
+    }
+
+    return {
+      walletAddress: session.user.walletAddress,
+      chainId: "sui:testnet"
+    };
+  }
+
+  private async requirePublicApp(appId: string) {
+    const app = await this.repository.findAppById(appId);
+
+    if (!app) {
+      throw notFound("App not found");
+    }
+
+    return app;
+  }
+
   private async requireApp(developerProfileId: string, appId: string) {
     const app = await this.repository.findAppByIdForDeveloperProfile(developerProfileId, appId);
 
@@ -836,6 +955,26 @@ export class DeveloperSetupService {
     }
 
     return app;
+  }
+
+  private toCheckoutSession(record: CheckoutSessionRecord) {
+    const checkoutUrl = new URL("/checkout", this.demoFrontendOrigin);
+    checkoutUrl.searchParams.set("appId", record.appId);
+    checkoutUrl.searchParams.set("checkoutSessionId", record.id);
+
+    return {
+      checkoutSessionId: record.id,
+      appId: record.appId,
+      walletAddress: record.walletAddress,
+      chainId: chainIdSchema.parse(record.chainId),
+      credits: record.credits,
+      status: record.status,
+      checkoutUrl: checkoutUrl.toString(),
+      successRedirectUrl: record.successRedirectUrl,
+      cancelRedirectUrl: record.cancelRedirectUrl,
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString()
+    };
   }
 }
 

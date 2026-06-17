@@ -32,14 +32,64 @@ describe("DemoConsumerShell", () => {
   });
 
   it("renders the SDK-backed signed-in demo state", async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ session }), {
-        status: 200,
-        headers: {
-          "content-type": "application/json"
-        }
-      })
-    );
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ session }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            catalog: {
+              appId: "app_123",
+              chainId: "sui:testnet",
+              actions: [
+                {
+                  actionType: "say_hello",
+                  priceCredits: 7,
+                  isEnabled: true
+                }
+              ]
+            }
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ session }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            balance: {
+              appId: "app_123",
+              walletAddress: session.user.walletAddress,
+              chainId: "sui:testnet",
+              availableCredits: 100
+            }
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        )
+      );
 
     render(
       <DemoConsumerShell
@@ -56,5 +106,7 @@ describe("DemoConsumerShell", () => {
 
     expect(screen.getByText("app_consumer:app_123")).toBeInTheDocument();
     expect(screen.getByText(session.user.walletAddress)).toBeInTheDocument();
+    expect(screen.getByText("100 credits")).toBeInTheDocument();
+    expect(screen.getByText("7 credits")).toBeInTheDocument();
   });
 });

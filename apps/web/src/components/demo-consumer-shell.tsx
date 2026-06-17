@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { createCelerisBrowserClient } from "@celeris/sdk-browser";
-import type { AuthSession } from "@celeris/shared";
+import { CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO, type AppBalance, type AppCatalog, type AuthSession } from "@celeris/shared";
 
 const demoAppIdStorageKey = "celeris.demo.appId";
 
@@ -26,9 +26,12 @@ export function DemoConsumerShell({
 }: DemoConsumerShellProps) {
   const [appId, setAppId] = useState(initialAppId);
   const [session, setSession] = useState<AuthSession | null>(null);
+  const [catalog, setCatalog] = useState<AppCatalog | null>(null);
+  const [balance, setBalance] = useState<AppBalance | null>(null);
   const [statusMessage, setStatusMessage] = useState("Ready for demo sign-in.");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [checkoutCredits, setCheckoutCredits] = useState(100);
 
   const client = useMemo(
     () =>
@@ -58,14 +61,22 @@ export function DemoConsumerShell({
 
     void (async () => {
       try {
-        const currentSession = await client.auth.getSession();
+        const [currentSession, currentCatalog] = await Promise.all([client.auth.getSession(), client.apps.getCatalog()]);
         setSession(currentSession);
+        setCatalog(currentCatalog);
         setStatusMessage(currentSession ? "Signed in to the demo app." : "Ready for demo sign-in.");
+        if (currentSession) {
+          setBalance(await client.credits.getBalance());
+        } else {
+          setBalance(null);
+        }
       } catch (error) {
         setErrorMessage(toErrorMessage(error));
       }
     })();
   }, [client]);
+
+  const sayHelloAction = catalog?.actions.find((action) => action.actionType === CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO) ?? null;
 
   async function handleAppConfig(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -110,10 +121,34 @@ export function DemoConsumerShell({
     try {
       await client.auth.signOut();
       setSession(null);
+      setBalance(null);
       setStatusMessage("Signed out.");
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function handleCheckout(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!client || !session) {
+      setErrorMessage("Sign in before buying credits.");
+      return;
+    }
+
+    setIsBusy(true);
+    setErrorMessage(null);
+
+    try {
+      await client.credits.startCheckout({
+        credits: checkoutCredits,
+        successRedirectUrl: new URL("/?checkout=success", demoFrontendOrigin).toString(),
+        cancelRedirectUrl: new URL("/?checkout=canceled", demoFrontendOrigin).toString()
+      });
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
       setIsBusy(false);
     }
   }
@@ -189,6 +224,39 @@ export function DemoConsumerShell({
               <dd>{session ? `${session.clientKind}:${session.clientId}` : "Not signed in"}</dd>
             </div>
           </dl>
+        </section>
+
+        <section className="workspace-band">
+          <div className="band-header">
+            <div>
+              <h2>Credits</h2>
+              <p>Buy demo credits through hosted mock checkout.</p>
+            </div>
+          </div>
+          <dl className="runtime-grid">
+            <div>
+              <dt>Balance</dt>
+              <dd>{balance ? `${balance.availableCredits} credits` : session ? "Loading" : "Sign in required"}</dd>
+            </div>
+            <div>
+              <dt>Say hello price</dt>
+              <dd>{sayHelloAction ? `${sayHelloAction.priceCredits} credits` : "Not configured"}</dd>
+            </div>
+          </dl>
+          <form className="form-grid compact checkout-form" onSubmit={handleCheckout}>
+            <label>
+              <span>Credits</span>
+              <input
+                min="1"
+                onChange={(event) => setCheckoutCredits(Number(event.target.value))}
+                type="number"
+                value={checkoutCredits}
+              />
+            </label>
+            <button className="button" disabled={isBusy || !session} type="submit">
+              Buy credits
+            </button>
+          </form>
         </section>
       </section>
 

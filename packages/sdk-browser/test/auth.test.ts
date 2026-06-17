@@ -152,4 +152,183 @@ describe("Celeris browser SDK auth", () => {
     expect(window.sessionStorage.getItem("celeris.auth.session.app_123")).toBeNull();
     expect(window.sessionStorage.getItem("celeris.zklogin.ephemeral.app_123")).toBeNull();
   });
+
+  it("fetches catalog, balance, and checkout through the public app APIs", async () => {
+    window.sessionStorage.setItem("celeris.auth.session.app_123", JSON.stringify(createSession()));
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            catalog: {
+              appId: "app_123",
+              chainId: "sui:testnet",
+              actions: [
+                {
+                  actionType: "say_hello",
+                  priceCredits: 5,
+                  isEnabled: true
+                }
+              ]
+            }
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ session: createSession() }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            balance: {
+              appId: "app_123",
+              walletAddress: createSession().user.walletAddress,
+              chainId: "sui:testnet",
+              availableCredits: 100
+            }
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ session: createSession() }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            checkoutSession: {
+              checkoutSessionId: "checkout_123",
+              appId: "app_123",
+              walletAddress: createSession().user.walletAddress,
+              chainId: "sui:testnet",
+              credits: 50,
+              status: "pending",
+              checkoutUrl: "http://localhost:3103/checkout?appId=app_123&checkoutSessionId=checkout_123",
+              successRedirectUrl: "http://localhost:3103/?checkout=success",
+              cancelRedirectUrl: "http://localhost:3103/?checkout=canceled",
+              createdAt: "2026-06-30T00:00:00.000Z",
+              updatedAt: "2026-06-30T00:00:00.000Z"
+            }
+          }),
+          {
+            status: 201,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        )
+      );
+
+    const client = createCelerisBrowserClient({
+      appId: "app_123",
+      apiOrigin: "http://localhost:4100",
+      hostedAuthOrigin: "http://localhost:3101",
+      redirectUri: "http://localhost:3103/auth/callback"
+    });
+
+    await expect(client.apps.getCatalog()).resolves.toMatchObject({
+      actions: [
+        {
+          actionType: "say_hello",
+          priceCredits: 5
+        }
+      ]
+    });
+    await expect(client.credits.getBalance()).resolves.toMatchObject({
+      availableCredits: 100
+    });
+    await expect(client.credits.startCheckout({ credits: 50, redirect: false })).resolves.toMatchObject({
+      checkoutSessionId: "checkout_123",
+      status: "pending"
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("/v1/apps/app_123/balance", "http://localhost:4100"),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: "Bearer token-123"
+        })
+      })
+    );
+  });
+
+  it("completes checkout and returns the refreshed ledger balance", async () => {
+    window.sessionStorage.setItem("celeris.auth.session.app_123", JSON.stringify(createSession()));
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ session: createSession() }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            checkoutSession: {
+              checkoutSessionId: "checkout_123",
+              appId: "app_123",
+              walletAddress: createSession().user.walletAddress,
+              chainId: "sui:testnet",
+              credits: 50,
+              status: "completed",
+              checkoutUrl: "http://localhost:3103/checkout?appId=app_123&checkoutSessionId=checkout_123",
+              successRedirectUrl: "http://localhost:3103/?checkout=success",
+              cancelRedirectUrl: "http://localhost:3103/?checkout=canceled",
+              createdAt: "2026-06-30T00:00:00.000Z",
+              updatedAt: "2026-06-30T00:00:00.000Z"
+            },
+            balance: {
+              appId: "app_123",
+              walletAddress: createSession().user.walletAddress,
+              chainId: "sui:testnet",
+              availableCredits: 50
+            }
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        )
+      );
+
+    const client = createCelerisBrowserClient({
+      appId: "app_123",
+      apiOrigin: "http://localhost:4100",
+      hostedAuthOrigin: "http://localhost:3101",
+      redirectUri: "http://localhost:3103/auth/callback"
+    });
+
+    await expect(client.credits.completeCheckout("checkout_123")).resolves.toMatchObject({
+      checkoutSession: {
+        status: "completed"
+      },
+      balance: {
+        availableCredits: 50
+      }
+    });
+  });
 });

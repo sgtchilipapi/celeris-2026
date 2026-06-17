@@ -305,6 +305,16 @@ a {
   min-height: 2.75rem;
 }
 
+.checkout-form {
+  margin-top: 1rem;
+}
+
+.checkout-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 .snippet-block {
   border-top: 1px solid var(--border);
   padding-top: 1rem;

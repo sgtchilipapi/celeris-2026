@@ -114,6 +114,8 @@ model App {
   actions          ManagedAction[]
   sponsorWallets   SponsorWallet[]
   registeredPrograms RegisteredProgram[]
+  checkoutSessions CheckoutSession[]
+  creditLedgerEntries CreditLedgerEntry[]
 
   @@index([developerId])
   @@index([developerProfileId])
@@ -162,4 +164,38 @@ model RegisteredProgram {
 
   @@unique([appId, chainFamily, network])
   @@index([appId])
+}
+
+model CheckoutSession {
+  id                 String   @id @default(cuid())
+  appId              String
+  walletAddress      String
+  chainId            String
+  credits            Int
+  status             String
+  successRedirectUrl String
+  cancelRedirectUrl  String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  app                App      @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@index([appId])
+  @@index([walletAddress])
+  @@index([status])
+}
+
+model CreditLedgerEntry {
+  id            String   @id @default(cuid())
+  appId         String
+  walletAddress String
+  chainId       String
+  deltaCredits  Int
+  reason        String
+  referenceType String
+  referenceId   String
+  createdAt     DateTime @default(now())
+  app           App      @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@unique([appId, referenceType, referenceId, reason])
+  @@index([appId, walletAddress])
 }

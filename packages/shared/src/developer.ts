@@ -169,6 +169,68 @@ export const configureSayHelloSchema = z.object({
   isEnabled: z.boolean().default(true)
 });
 
+export const catalogActionSchema = z.object({
+  actionType: z.literal(CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO),
+  priceCredits: z.number().int().nonnegative(),
+  isEnabled: z.boolean()
+});
+
+export const appCatalogSchema = z.object({
+  appId: z.string().min(1),
+  chainId: chainIdSchema,
+  actions: z.array(catalogActionSchema)
+});
+
+export const appCatalogResponseSchema = z.object({
+  catalog: appCatalogSchema
+});
+
+export const appBalanceSchema = z.object({
+  appId: z.string().min(1),
+  walletAddress: suiAddressSchema,
+  chainId: chainIdSchema,
+  availableCredits: z.number().int()
+});
+
+export const appBalanceResponseSchema = z.object({
+  balance: appBalanceSchema
+});
+
+export const checkoutSessionStatusSchema = z.union([
+  z.literal("pending"),
+  z.literal("completed"),
+  z.literal("canceled")
+]);
+
+export const createCheckoutSessionSchema = z.object({
+  credits: z.coerce.number().int().positive().max(100_000),
+  successRedirectUrl: z.string().url().optional(),
+  cancelRedirectUrl: z.string().url().optional()
+});
+
+export const checkoutSessionSchema = z.object({
+  checkoutSessionId: z.string().min(1),
+  appId: z.string().min(1),
+  walletAddress: suiAddressSchema,
+  chainId: chainIdSchema,
+  credits: z.number().int().positive(),
+  status: checkoutSessionStatusSchema,
+  checkoutUrl: z.string().url(),
+  successRedirectUrl: z.string().url(),
+  cancelRedirectUrl: z.string().url(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+
+export const checkoutSessionResponseSchema = z.object({
+  checkoutSession: checkoutSessionSchema
+});
+
+export const completeCheckoutSessionResponseSchema = z.object({
+  checkoutSession: checkoutSessionSchema,
+  balance: appBalanceSchema
+});
+
 export const developerAppSchema = z.object({
   appId: z.string().min(1),
   name: z.string().min(1),
@@ -246,3 +308,9 @@ export type RegisteredProgram = z.infer<typeof registeredProgramSchema>;
 export type RegisterProgramInput = z.infer<typeof registerProgramSchema>;
 export type ManagedAction = z.infer<typeof managedActionSchema>;
 export type ConfigureSayHelloInput = z.infer<typeof configureSayHelloSchema>;
+export type CatalogAction = z.infer<typeof catalogActionSchema>;
+export type AppCatalog = z.infer<typeof appCatalogSchema>;
+export type AppBalance = z.infer<typeof appBalanceSchema>;
+export type CheckoutSessionStatus = z.infer<typeof checkoutSessionStatusSchema>;
+export type CreateCheckoutSessionInput = z.infer<typeof createCheckoutSessionSchema>;
+export type CheckoutSession = z.infer<typeof checkoutSessionSchema>;
