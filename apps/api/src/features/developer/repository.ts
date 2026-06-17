@@ -6,18 +6,58 @@ import {
   CELERIS_NETWORK_TESTNET
 } from "@celeris/shared";
 
-export interface DeveloperAccountRecord {
+export interface UserIdentityRecord {
   id: string;
+  issuer: string;
+  subject: string;
   email: string;
-  passwordHash: string;
+  displayName: string | null;
+  salt: string;
+  walletAddress: string;
   createdAt: Date;
   updatedAt: Date;
 }
 
-export interface DeveloperSessionRecord {
+export interface DeveloperProfileRecord {
   id: string;
-  developerId: string;
+  userIdentityId: string;
+  email: string;
+  displayName: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface AuthLoginRequestRecord {
+  id: string;
+  clientKind: string;
+  clientId: string;
+  appId: string | null;
+  state: string;
+  oauthState: string | null;
+  redirectUri: string;
+  nonce: string | null;
+  extendedEphemeralPublicKey: string | null;
+  maxEpoch: number | null;
+  jwtRandomness: string | null;
+  zkLoginProofInputsJson: string | null;
+  status: string;
+  authCode: string | null;
+  userIdentityId: string | null;
+  expiresAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface UserSessionRecord {
+  id: string;
+  userIdentityId: string;
+  clientKind: string;
+  clientId: string;
+  appId: string | null;
+  walletAddress: string;
+  chainId: string;
   tokenHash: string;
+  zkLoginProofInputsJson: string | null;
   expiresAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -25,7 +65,8 @@ export interface DeveloperSessionRecord {
 
 export interface AppRecord {
   id: string;
-  developerId: string;
+  developerId: string | null;
+  developerProfileId: string | null;
   name: string;
   slug: string;
   allowedChainId: string;
@@ -74,24 +115,62 @@ export interface DeveloperAppAggregateRecord {
   sayHelloAction: ManagedActionRecord | null;
 }
 
-export interface DeveloperSessionWithDeveloperRecord {
-  session: DeveloperSessionRecord;
-  developer: DeveloperAccountRecord;
+export interface UserSessionAggregateRecord {
+  session: UserSessionRecord;
+  userIdentity: UserIdentityRecord;
+  developerProfile: DeveloperProfileRecord | null;
 }
 
-export interface CreateDeveloperAccountInput {
+export interface CreateUserIdentityInput {
+  issuer: string;
+  subject: string;
   email: string;
-  passwordHash: string;
+  displayName?: string | null;
+  salt: string;
+  walletAddress: string;
 }
 
-export interface CreateDeveloperSessionInput {
-  developerId: string;
+export interface UpsertDeveloperProfileInput {
+  userIdentityId: string;
+  email: string;
+  displayName?: string | null;
+}
+
+export interface CreateAuthLoginRequestInput {
+  clientKind: string;
+  clientId: string;
+  appId?: string | null;
+  state: string;
+  oauthState: string;
+  redirectUri: string;
+  nonce?: string | null;
+  extendedEphemeralPublicKey?: string | null;
+  maxEpoch?: number | null;
+  jwtRandomness?: string | null;
+  expiresAt: Date;
+}
+
+export interface CompleteAuthLoginRequestInput {
+  loginRequestId: string;
+  authCode: string;
+  userIdentityId: string;
+  zkLoginProofInputsJson?: string | null;
+}
+
+export interface CreateUserSessionInput {
+  userIdentityId: string;
+  clientKind: string;
+  clientId: string;
+  appId?: string | null;
+  walletAddress: string;
+  chainId: string;
   tokenHash: string;
+  zkLoginProofInputsJson?: string | null;
   expiresAt: Date;
 }
 
 export interface CreateDeveloperAppRecordInput {
-  developerId: string;
+  developerProfileId: string;
   name: string;
   slug: string;
   allowedChainId: string;
@@ -118,33 +197,28 @@ export interface UpsertManagedActionInput {
 }
 
 export interface DeveloperSetupRepository {
-  createDeveloperAccount(input: CreateDeveloperAccountInput): Promise<DeveloperAccountRecord>;
-  findDeveloperAccountByEmail(email: string): Promise<DeveloperAccountRecord | null>;
-  createDeveloperSession(input: CreateDeveloperSessionInput): Promise<DeveloperSessionRecord>;
-  findDeveloperSessionByTokenHash(tokenHash: string): Promise<DeveloperSessionWithDeveloperRecord | null>;
-  deleteDeveloperSessionByTokenHash(tokenHash: string): Promise<void>;
+  findUserIdentityById(id: string): Promise<UserIdentityRecord | null>;
+  findUserIdentityByIssuerSubject(issuer: string, subject: string): Promise<UserIdentityRecord | null>;
+  createUserIdentity(input: CreateUserIdentityInput): Promise<UserIdentityRecord>;
+  upsertDeveloperProfile(input: UpsertDeveloperProfileInput): Promise<DeveloperProfileRecord>;
+  findDeveloperProfileById(id: string): Promise<DeveloperProfileRecord | null>;
+  createAuthLoginRequest(input: CreateAuthLoginRequestInput): Promise<AuthLoginRequestRecord>;
+  findAuthLoginRequestById(id: string): Promise<AuthLoginRequestRecord | null>;
+  findAuthLoginRequestByOAuthState(oauthState: string): Promise<AuthLoginRequestRecord | null>;
+  findAuthLoginRequestByAuthCode(authCode: string): Promise<AuthLoginRequestRecord | null>;
+  completeAuthLoginRequest(input: CompleteAuthLoginRequestInput): Promise<AuthLoginRequestRecord>;
+  createUserSession(input: CreateUserSessionInput): Promise<UserSessionRecord>;
+  findUserSessionByTokenHash(tokenHash: string): Promise<UserSessionAggregateRecord | null>;
+  deleteUserSessionByTokenHash(tokenHash: string): Promise<void>;
   createApp(input: CreateDeveloperAppRecordInput): Promise<DeveloperAppAggregateRecord>;
-  listAppsByDeveloperId(developerId: string): Promise<DeveloperAppAggregateRecord[]>;
-  findAppByIdForDeveloper(developerId: string, appId: string): Promise<DeveloperAppAggregateRecord | null>;
+  findAppById(appId: string): Promise<DeveloperAppAggregateRecord | null>;
+  listAppsByDeveloperProfileId(developerProfileId: string): Promise<DeveloperAppAggregateRecord[]>;
+  findAppByIdForDeveloperProfile(developerProfileId: string, appId: string): Promise<DeveloperAppAggregateRecord | null>;
   upsertSponsorWallet(input: UpsertSponsorWalletInput): Promise<SponsorWalletRecord>;
   findSponsorWalletByAppId(appId: string): Promise<SponsorWalletRecord | null>;
   upsertRegisteredProgram(input: UpsertRegisteredProgramInput): Promise<RegisteredProgramRecord>;
   findRegisteredProgramByAppId(appId: string): Promise<RegisteredProgramRecord | null>;
   upsertManagedAction(input: UpsertManagedActionInput): Promise<ManagedActionRecord>;
-}
-
-function toAggregate<TApp extends AppRecord>(input: {
-  app: TApp;
-  sponsorWallet: SponsorWalletRecord | null;
-  registeredProgram: RegisteredProgramRecord | null;
-  sayHelloAction: ManagedActionRecord | null;
-}): DeveloperAppAggregateRecord {
-  return {
-    app: input.app,
-    sponsorWallet: input.sponsorWallet,
-    registeredProgram: input.registeredProgram,
-    sayHelloAction: input.sayHelloAction
-  };
 }
 
 function extractSayHelloAction(actions: ManagedActionRecord[]) {
@@ -153,7 +227,8 @@ function extractSayHelloAction(actions: ManagedActionRecord[]) {
 
 function fromPrismaAppAggregate(record: {
   id: string;
-  developerId: string;
+  developerId: string | null;
+  developerProfileId: string | null;
   name: string;
   slug: string;
   allowedChainId: string;
@@ -163,11 +238,12 @@ function fromPrismaAppAggregate(record: {
   sponsorWallets: SponsorWalletRecord[];
   registeredPrograms: RegisteredProgramRecord[];
   actions: ManagedActionRecord[];
-}) {
-  return toAggregate({
+}): DeveloperAppAggregateRecord {
+  return {
     app: {
       id: record.id,
       developerId: record.developerId,
+      developerProfileId: record.developerProfileId,
       name: record.name,
       slug: record.slug,
       allowedChainId: record.allowedChainId,
@@ -178,7 +254,7 @@ function fromPrismaAppAggregate(record: {
     sponsorWallet: record.sponsorWallets[0] ?? null,
     registeredProgram: record.registeredPrograms[0] ?? null,
     sayHelloAction: extractSayHelloAction(record.actions)
-  });
+  };
 }
 
 export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient()): DeveloperSetupRepository {
@@ -189,26 +265,116 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
   } as const;
 
   return {
-    async createDeveloperAccount(input) {
-      return prisma.developerAccount.create({
+    async findUserIdentityById(id) {
+      return prisma.userIdentity.findUnique({
+        where: { id }
+      });
+    },
+    async findUserIdentityByIssuerSubject(issuer, subject) {
+      return prisma.userIdentity.findUnique({
+        where: {
+          issuer_subject: {
+            issuer,
+            subject
+          }
+        }
+      });
+    },
+    async createUserIdentity(input) {
+      return prisma.userIdentity.create({
         data: input
       });
     },
-    async findDeveloperAccountByEmail(email) {
-      return prisma.developerAccount.findUnique({
-        where: { email }
+    async upsertDeveloperProfile(input) {
+      return prisma.developerProfile.upsert({
+        where: {
+          userIdentityId: input.userIdentityId
+        },
+        update: {
+          email: input.email,
+          displayName: input.displayName ?? null
+        },
+        create: {
+          userIdentityId: input.userIdentityId,
+          email: input.email,
+          displayName: input.displayName ?? null
+        }
       });
     },
-    async createDeveloperSession(input) {
-      return prisma.developerSession.create({
-        data: input
+    async findDeveloperProfileById(id) {
+      return prisma.developerProfile.findUnique({
+        where: { id }
       });
     },
-    async findDeveloperSessionByTokenHash(tokenHash) {
-      const record = await prisma.developerSession.findUnique({
+    async createAuthLoginRequest(input) {
+      return prisma.authLoginRequest.create({
+        data: {
+          clientKind: input.clientKind,
+          clientId: input.clientId,
+          appId: input.appId ?? null,
+          state: input.state,
+          oauthState: input.oauthState,
+          redirectUri: input.redirectUri,
+          nonce: input.nonce ?? null,
+          extendedEphemeralPublicKey: input.extendedEphemeralPublicKey ?? null,
+          maxEpoch: input.maxEpoch ?? null,
+          jwtRandomness: input.jwtRandomness ?? null,
+          zkLoginProofInputsJson: null,
+          status: "pending",
+          expiresAt: input.expiresAt
+        }
+      });
+    },
+    async findAuthLoginRequestById(id) {
+      return prisma.authLoginRequest.findUnique({
+        where: { id }
+      });
+    },
+    async findAuthLoginRequestByOAuthState(oauthState) {
+      return prisma.authLoginRequest.findUnique({
+        where: { oauthState }
+      });
+    },
+    async findAuthLoginRequestByAuthCode(authCode) {
+      return prisma.authLoginRequest.findUnique({
+        where: { authCode }
+      });
+    },
+    async completeAuthLoginRequest(input) {
+      return prisma.authLoginRequest.update({
+        where: { id: input.loginRequestId },
+        data: {
+          status: "completed",
+          authCode: input.authCode,
+          userIdentityId: input.userIdentityId,
+          zkLoginProofInputsJson: input.zkLoginProofInputsJson ?? null
+        }
+      });
+    },
+    async createUserSession(input) {
+      return prisma.userSession.create({
+        data: {
+          userIdentityId: input.userIdentityId,
+          clientKind: input.clientKind,
+          clientId: input.clientId,
+          appId: input.appId ?? null,
+          walletAddress: input.walletAddress,
+          chainId: input.chainId,
+          tokenHash: input.tokenHash,
+          zkLoginProofInputsJson: input.zkLoginProofInputsJson ?? null,
+          expiresAt: input.expiresAt
+        }
+      });
+    },
+    async findUserSessionByTokenHash(tokenHash) {
+      const record = await prisma.userSession.findUnique({
         where: { tokenHash },
         include: {
-          developer: true
+          userIdentity: {
+            include: {
+              developerProfile: true
+            }
+          }
         }
       });
 
@@ -219,42 +385,73 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
       return {
         session: {
           id: record.id,
-          developerId: record.developerId,
+          userIdentityId: record.userIdentityId,
+          clientKind: record.clientKind,
+          clientId: record.clientId,
+          appId: record.appId,
+          walletAddress: record.walletAddress,
+          chainId: record.chainId,
           tokenHash: record.tokenHash,
+          zkLoginProofInputsJson: record.zkLoginProofInputsJson,
           expiresAt: record.expiresAt,
           createdAt: record.createdAt,
           updatedAt: record.updatedAt
         },
-        developer: record.developer
+        userIdentity: {
+          id: record.userIdentity.id,
+          issuer: record.userIdentity.issuer,
+          subject: record.userIdentity.subject,
+          email: record.userIdentity.email,
+          displayName: record.userIdentity.displayName,
+          salt: record.userIdentity.salt,
+          walletAddress: record.userIdentity.walletAddress,
+          createdAt: record.userIdentity.createdAt,
+          updatedAt: record.userIdentity.updatedAt
+        },
+        developerProfile: record.userIdentity.developerProfile
       };
     },
-    async deleteDeveloperSessionByTokenHash(tokenHash) {
-      await prisma.developerSession.deleteMany({
+    async deleteUserSessionByTokenHash(tokenHash) {
+      await prisma.userSession.deleteMany({
         where: { tokenHash }
       });
     },
     async createApp(input) {
       const record = await prisma.app.create({
-        data: input,
+        data: {
+          developerProfileId: input.developerProfileId,
+          name: input.name,
+          slug: input.slug,
+          allowedChainId: input.allowedChainId,
+          authProvider: input.authProvider
+        },
         include: appInclude
       });
 
       return fromPrismaAppAggregate(record);
     },
-    async listAppsByDeveloperId(developerId) {
+    async findAppById(appId) {
+      const record = await prisma.app.findUnique({
+        where: { id: appId },
+        include: appInclude
+      });
+
+      return record ? fromPrismaAppAggregate(record) : null;
+    },
+    async listAppsByDeveloperProfileId(developerProfileId) {
       const records = await prisma.app.findMany({
-        where: { developerId },
+        where: { developerProfileId },
         orderBy: { createdAt: "asc" },
         include: appInclude
       });
 
       return records.map(fromPrismaAppAggregate);
     },
-    async findAppByIdForDeveloper(developerId, appId) {
+    async findAppByIdForDeveloperProfile(developerProfileId, appId) {
       const record = await prisma.app.findFirst({
         where: {
           id: appId,
-          developerId
+          developerProfileId
         },
         include: appInclude
       });
@@ -353,9 +550,13 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
 }
 
 export function createInMemoryDeveloperSetupRepository(): DeveloperSetupRepository {
-  const developers = new Map<string, DeveloperAccountRecord>();
-  const developersByEmail = new Map<string, DeveloperAccountRecord>();
-  const sessionsByTokenHash = new Map<string, DeveloperSessionRecord>();
+  const userIdentities = new Map<string, UserIdentityRecord>();
+  const userIdentityKeys = new Map<string, string>();
+  const developerProfilesByIdentityId = new Map<string, DeveloperProfileRecord>();
+  const authLoginRequests = new Map<string, AuthLoginRequestRecord>();
+  const authLoginRequestOAuthStates = new Map<string, string>();
+  const authLoginRequestCodes = new Map<string, string>();
+  const sessionsByTokenHash = new Map<string, UserSessionRecord>();
   const apps = new Map<string, AppRecord>();
   const sponsorWalletsByAppId = new Map<string, SponsorWalletRecord>();
   const programsByAppId = new Map<string, RegisteredProgramRecord>();
@@ -375,29 +576,124 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
   }
 
   return {
-    async createDeveloperAccount(input) {
+    async findUserIdentityById(id) {
+      return userIdentities.get(id) ?? null;
+    },
+    async findUserIdentityByIssuerSubject(issuer, subject) {
+      const id = userIdentityKeys.get(`${issuer}:${subject}`);
+      return id ? userIdentities.get(id) ?? null : null;
+    },
+    async createUserIdentity(input) {
       const now = new Date();
-      const record: DeveloperAccountRecord = {
-        id: makeId("dev"),
+      const record: UserIdentityRecord = {
+        id: makeId("user"),
+        issuer: input.issuer,
+        subject: input.subject,
         email: input.email,
-        passwordHash: input.passwordHash,
+        displayName: input.displayName ?? null,
+        salt: input.salt,
+        walletAddress: input.walletAddress,
         createdAt: now,
         updatedAt: now
       };
 
-      developers.set(record.id, record);
-      developersByEmail.set(record.email, record);
+      userIdentities.set(record.id, record);
+      userIdentityKeys.set(`${record.issuer}:${record.subject}`, record.id);
       return record;
     },
-    async findDeveloperAccountByEmail(email) {
-      return developersByEmail.get(email) ?? null;
-    },
-    async createDeveloperSession(input) {
+    async upsertDeveloperProfile(input) {
+      const existing = developerProfilesByIdentityId.get(input.userIdentityId);
       const now = new Date();
-      const record: DeveloperSessionRecord = {
-        id: makeId("ds"),
-        developerId: input.developerId,
+      const record: DeveloperProfileRecord = {
+        id: existing?.id ?? makeId("profile"),
+        userIdentityId: input.userIdentityId,
+        email: input.email,
+        displayName: input.displayName ?? null,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now
+      };
+
+      developerProfilesByIdentityId.set(record.userIdentityId, record);
+      return record;
+    },
+    async findDeveloperProfileById(id) {
+      for (const profile of developerProfilesByIdentityId.values()) {
+        if (profile.id === id) {
+          return profile;
+        }
+      }
+      return null;
+    },
+    async createAuthLoginRequest(input) {
+      const now = new Date();
+      const record: AuthLoginRequestRecord = {
+        id: makeId("login"),
+        clientKind: input.clientKind,
+        clientId: input.clientId,
+        appId: input.appId ?? null,
+        state: input.state,
+        oauthState: input.oauthState,
+        redirectUri: input.redirectUri,
+        nonce: input.nonce ?? null,
+        extendedEphemeralPublicKey: input.extendedEphemeralPublicKey ?? null,
+        maxEpoch: input.maxEpoch ?? null,
+        jwtRandomness: input.jwtRandomness ?? null,
+        zkLoginProofInputsJson: null,
+        status: "pending",
+        authCode: null,
+        userIdentityId: null,
+        expiresAt: input.expiresAt,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      authLoginRequests.set(record.id, record);
+      authLoginRequestOAuthStates.set(record.oauthState ?? "", record.id);
+      return record;
+    },
+    async findAuthLoginRequestById(id) {
+      return authLoginRequests.get(id) ?? null;
+    },
+    async findAuthLoginRequestByOAuthState(oauthState) {
+      const id = authLoginRequestOAuthStates.get(oauthState);
+      return id ? authLoginRequests.get(id) ?? null : null;
+    },
+    async findAuthLoginRequestByAuthCode(authCode) {
+      const id = authLoginRequestCodes.get(authCode);
+      return id ? authLoginRequests.get(id) ?? null : null;
+    },
+    async completeAuthLoginRequest(input) {
+      const existing = authLoginRequests.get(input.loginRequestId);
+
+      if (!existing) {
+        throw new Error("Unknown login request");
+      }
+
+      const record: AuthLoginRequestRecord = {
+        ...existing,
+        status: "completed",
+        authCode: input.authCode,
+        userIdentityId: input.userIdentityId,
+        zkLoginProofInputsJson: input.zkLoginProofInputsJson ?? null,
+        updatedAt: new Date()
+      };
+
+      authLoginRequests.set(record.id, record);
+      authLoginRequestCodes.set(input.authCode, record.id);
+      return record;
+    },
+    async createUserSession(input) {
+      const now = new Date();
+      const record: UserSessionRecord = {
+        id: makeId("session"),
+        userIdentityId: input.userIdentityId,
+        clientKind: input.clientKind,
+        clientId: input.clientId,
+        appId: input.appId ?? null,
+        walletAddress: input.walletAddress,
+        chainId: input.chainId,
         tokenHash: input.tokenHash,
+        zkLoginProofInputsJson: input.zkLoginProofInputsJson ?? null,
         expiresAt: input.expiresAt,
         createdAt: now,
         updatedAt: now
@@ -406,32 +702,32 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
       sessionsByTokenHash.set(record.tokenHash, record);
       return record;
     },
-    async findDeveloperSessionByTokenHash(tokenHash) {
+    async findUserSessionByTokenHash(tokenHash) {
       const session = sessionsByTokenHash.get(tokenHash);
-
       if (!session) {
         return null;
       }
 
-      const developer = developers.get(session.developerId);
-
-      if (!developer) {
+      const userIdentity = userIdentities.get(session.userIdentityId);
+      if (!userIdentity) {
         return null;
       }
 
       return {
         session,
-        developer
+        userIdentity,
+        developerProfile: developerProfilesByIdentityId.get(userIdentity.id) ?? null
       };
     },
-    async deleteDeveloperSessionByTokenHash(tokenHash) {
+    async deleteUserSessionByTokenHash(tokenHash) {
       sessionsByTokenHash.delete(tokenHash);
     },
     async createApp(input) {
       const now = new Date();
       const app: AppRecord = {
         id: makeId("app"),
-        developerId: input.developerId,
+        developerId: null,
+        developerProfileId: input.developerProfileId,
         name: input.name,
         slug: input.slug,
         allowedChainId: input.allowedChainId,
@@ -443,16 +739,20 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
       apps.set(app.id, app);
       return getAggregate(app);
     },
-    async listAppsByDeveloperId(developerId) {
+    async findAppById(appId) {
+      const app = apps.get(appId);
+      return app ? getAggregate(app) : null;
+    },
+    async listAppsByDeveloperProfileId(developerProfileId) {
       return Array.from(apps.values())
-        .filter((app) => app.developerId === developerId)
+        .filter((app) => app.developerProfileId === developerProfileId)
         .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())
         .map(getAggregate);
     },
-    async findAppByIdForDeveloper(developerId, appId) {
+    async findAppByIdForDeveloperProfile(developerProfileId, appId) {
       const app = apps.get(appId);
 
-      if (!app || app.developerId !== developerId) {
+      if (!app || app.developerProfileId !== developerProfileId) {
         return null;
       }
 

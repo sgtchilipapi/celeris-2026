@@ -17,7 +17,16 @@ function getService(options?: DeveloperRouterOptions) {
   return getRuntimeDeveloperSetupService({
     apiOrigin: env.API_ORIGIN,
     hostedAuthOrigin: env.CELERIS_HOSTED_AUTH_ORIGIN,
-    encryptionKey: env.CELERIS_APP_ENCRYPTION_KEY
+    developerAppOrigin: env.CELERIS_DEVELOPER_APP_ORIGIN,
+    demoFrontendOrigin: env.CELERIS_DEMO_FRONTEND_ORIGIN,
+    encryptionKey: env.CELERIS_APP_ENCRYPTION_KEY,
+    googleClientId: env.CELERIS_GOOGLE_CLIENT_ID,
+    googleClientSecret: env.CELERIS_GOOGLE_CLIENT_SECRET,
+    googleRedirectUri: env.CELERIS_GOOGLE_REDIRECT_URI,
+    googleIssuer: env.CELERIS_GOOGLE_ISSUER,
+    zkLoginSaltSeed: env.CELERIS_ZKLOGIN_SALT_SEED,
+    zkLoginProverOrigin: env.CELERIS_ZKLOGIN_PROVER_ORIGIN,
+    zkLoginMaxEpochWindow: env.CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW
   });
 }
 
@@ -43,13 +52,35 @@ function requireRouteParam(value: string | string[] | undefined, label: string) 
   return value;
 }
 
+function requireQueryParam(value: unknown, label: string) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw badRequest(`Missing ${label}`);
+  }
+
+  return value;
+}
+
 function createDeveloperAuthMiddleware(resolveService: () => DeveloperSetupService): RequestHandler {
   return async (req, res, next) => {
     try {
       const token = extractBearerToken(req.header("authorization"));
-      const developer = await resolveService().authenticateDeveloper(token);
-      res.locals.developer = developer;
-      res.locals.developerToken = token;
+      const developerProfile = await resolveService().authenticateDeveloper(token);
+      res.locals.developerProfile = developerProfile;
+      res.locals.authToken = token;
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
+function createUserSessionMiddleware(resolveService: () => DeveloperSetupService): RequestHandler {
+  return async (req, res, next) => {
+    try {
+      const token = extractBearerToken(req.header("authorization"));
+      const session = await resolveService().getSession(token);
+      res.locals.userSession = session;
+      res.locals.authToken = token;
       next();
     } catch (error) {
       next(error);
@@ -61,63 +92,108 @@ export function createDeveloperRouter(options?: DeveloperRouterOptions) {
   const router = Router();
   const resolveService = () => getService(options);
   const developerAuth = createDeveloperAuthMiddleware(resolveService);
+  const userSession = createUserSessionMiddleware(resolveService);
 
-  router.post("/v1/developer/sign-up", async (req, res) => {
-    const session = await resolveService().signUp(req.body);
-    res.status(201).json(session);
+  router.post("/v1/auth/login-requests", async (req, res) => {
+    const loginRequest = await resolveService().createLoginRequest(req.body);
+    res.status(201).json({ loginRequest });
   });
 
-  router.post("/v1/developer/sign-in", async (req, res) => {
-    const session = await resolveService().signIn(req.body);
-    res.status(200).json(session);
+  router.get("/v1/auth/login-requests/:loginRequestId", async (req, res) => {
+    const loginRequest = await resolveService().getLoginRequest(requireRouteParam(req.params.loginRequestId, "loginRequestId"));
+    res.status(200).json({ loginRequest });
   });
 
-  router.post("/v1/developer/sign-out", developerAuth, async (_req, res) => {
-    const token = res.locals.developerToken as string;
+  router.get("/v1/auth/google/start", async (req, res) => {
+    const loginRequestId = requireQueryParam(req.query.loginRequestId, "loginRequestId");
+    const result = await resolveService().startGoogleOAuth(loginRequestId);
+    res.redirect(302, result.redirectTo);
+  });
+
+  router.get("/v1/auth/google/callback", async (req, res) => {
+    const result = await resolveService().completeGoogleOAuth({
+      code: requireQueryParam(req.query.code, "code"),
+      state: requireQueryParam(req.query.state, "state")
+    });
+    res.redirect(302, result.redirectTo);
+  });
+
+  router.post("/v1/auth/login-requests/:loginRequestId/complete", async (req, res) => {
+    const result = await resolveService().completeLoginRequest(requireRouteParam(req.params.loginRequestId, "loginRequestId"), req.body);
+    res.status(200).json(result);
+  });
+
+  router.post("/v1/auth/token", async (req, res) => {
+    const session = await resolveService().exchangeToken(req.body);
+    res.status(200).json({ session });
+  });
+
+  router.post("/v1/auth/logout", userSession, async (_req, res) => {
+    const token = res.locals.authToken as string;
     await resolveService().signOut(token);
     res.status(204).end();
   });
 
+  router.get("/v1/me", userSession, async (_req, res) => {
+    res.status(200).json({ session: res.locals.userSession });
+  });
+
+  router.get("/v1/developer/me", developerAuth, async (_req, res) => {
+    res.status(200).json({
+      developerProfile: {
+        id: res.locals.developerProfile.id,
+        email: res.locals.developerProfile.email,
+        displayName: res.locals.developerProfile.displayName
+      }
+    });
+  });
+
+  router.post("/v1/developer/profile", developerAuth, async (_req, res) => {
+    const token = res.locals.authToken as string;
+    const developerProfile = await resolveService().ensureDeveloperProfile(token);
+    res.status(200).json({ developerProfile });
+  });
+
   router.get("/v1/developer/apps", developerAuth, async (_req, res) => {
-    const developer = res.locals.developer as { id: string };
-    const apps = await resolveService().listApps(developer.id);
+    const developerProfile = res.locals.developerProfile as { id: string };
+    const apps = await resolveService().listApps(developerProfile.id);
     res.status(200).json({ apps });
   });
 
   router.post("/v1/developer/apps", developerAuth, async (req, res) => {
-    const developer = res.locals.developer as { id: string };
-    const app = await resolveService().createApp(developer.id, req.body);
+    const developerProfile = res.locals.developerProfile as { id: string };
+    const app = await resolveService().createApp(developerProfile.id, req.body);
     res.status(201).json({ app });
   });
 
   router.get("/v1/developer/apps/:appId", developerAuth, async (req, res) => {
-    const developer = res.locals.developer as { id: string };
-    const app = await resolveService().getApp(developer.id, requireRouteParam(req.params.appId, "appId"));
+    const developerProfile = res.locals.developerProfile as { id: string };
+    const app = await resolveService().getApp(developerProfile.id, requireRouteParam(req.params.appId, "appId"));
     res.status(200).json({ app });
   });
 
   router.post("/v1/developer/apps/:appId/sponsor-wallet", developerAuth, async (req, res) => {
-    const developer = res.locals.developer as { id: string };
+    const developerProfile = res.locals.developerProfile as { id: string };
     const sponsorWallet = await resolveService().provisionSponsorWallet(
-      developer.id,
+      developerProfile.id,
       requireRouteParam(req.params.appId, "appId")
     );
     res.status(201).json({ sponsorWallet });
   });
 
   router.get("/v1/developer/apps/:appId/sponsor-wallet", developerAuth, async (req, res) => {
-    const developer = res.locals.developer as { id: string };
+    const developerProfile = res.locals.developerProfile as { id: string };
     const sponsorWallet = await resolveService().getSponsorWallet(
-      developer.id,
+      developerProfile.id,
       requireRouteParam(req.params.appId, "appId")
     );
     res.status(200).json({ sponsorWallet });
   });
 
   router.put("/v1/developer/apps/:appId/program", developerAuth, async (req, res) => {
-    const developer = res.locals.developer as { id: string };
+    const developerProfile = res.locals.developerProfile as { id: string };
     const registeredProgram = await resolveService().registerProgram(
-      developer.id,
+      developerProfile.id,
       requireRouteParam(req.params.appId, "appId"),
       req.body
     );
@@ -125,18 +201,18 @@ export function createDeveloperRouter(options?: DeveloperRouterOptions) {
   });
 
   router.get("/v1/developer/apps/:appId/program", developerAuth, async (req, res) => {
-    const developer = res.locals.developer as { id: string };
+    const developerProfile = res.locals.developerProfile as { id: string };
     const registeredProgram = await resolveService().getRegisteredProgram(
-      developer.id,
+      developerProfile.id,
       requireRouteParam(req.params.appId, "appId")
     );
     res.status(200).json({ registeredProgram });
   });
 
   router.put("/v1/developer/apps/:appId/actions/say_hello", developerAuth, async (req, res) => {
-    const developer = res.locals.developer as { id: string };
+    const developerProfile = res.locals.developerProfile as { id: string };
     const sayHelloAction = await resolveService().configureSayHello(
-      developer.id,
+      developerProfile.id,
       requireRouteParam(req.params.appId, "appId"),
       req.body
     );

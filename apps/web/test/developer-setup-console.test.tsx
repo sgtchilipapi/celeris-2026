@@ -8,27 +8,41 @@ describe("DeveloperSetupConsole", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
     window.sessionStorage.clear();
+    document.cookie = "celeris_dashboard_session=; Path=/; Max-Age=0; SameSite=Lax";
     fetchMock.mockReset();
+    window.sessionStorage.setItem("celeris.fs011.dashboard.token", "token-123");
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("can sign up and create an app through the public APIs", async () => {
+  it("loads the shared-auth dashboard session and creates an app through the public APIs", async () => {
     fetchMock
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            developer: {
-              id: "dev_1",
-              email: "dev@example.com"
-            },
-            token: "token-123",
-            expiresAt: "2026-06-30T00:00:00.000Z"
+            session: {
+              token: "token-123",
+              expiresAt: "2026-06-30T00:00:00.000Z",
+              clientKind: "developer_dashboard",
+              clientId: "celeris-dashboard",
+              appId: null,
+              user: {
+                id: "user_1",
+                email: "dev@example.com",
+                walletAddress: "0x2c45b9cf7d7c5fc33dbd0a1b5c14fffd7a74ac6f9ed6d7f2d881d7ec8e5a2011"
+              },
+              developerProfile: {
+                id: "profile_1",
+                email: "dev@example.com",
+                displayName: "Developer"
+              },
+              zkLogin: null
+            }
           }),
           {
-            status: 201,
+            status: 200,
             headers: {
               "content-type": "application/json"
             }
@@ -67,7 +81,8 @@ describe("DeveloperSetupConsole", () => {
                 allowedChainId: "sui:testnet",
                 authProvider: "zklogin",
                 apiOrigin: "http://localhost:4100",
-                hostedAuthOrigin: "http://localhost:3101"
+                hostedAuthOrigin: "http://localhost:3101",
+                demoOrigin: "http://localhost:3102"
               }
             }
           }),
@@ -80,28 +95,14 @@ describe("DeveloperSetupConsole", () => {
         )
       );
 
-    render(<DeveloperSetupConsole apiOrigin="http://localhost:4100" hostedAuthOrigin="http://localhost:3101" />);
-
-    fireEvent.change(screen.getByLabelText("Email"), {
-      target: {
-        value: "dev@example.com"
-      }
-    });
-    fireEvent.change(screen.getByLabelText("Password"), {
-      target: {
-        value: "password-123"
-      }
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create developer" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        new URL("/v1/developer/sign-up", "http://localhost:4100"),
-        expect.objectContaining({
-          method: "POST"
-        })
-      );
-    });
+    render(
+      <DeveloperSetupConsole
+        apiOrigin="http://localhost:4100"
+        hostedAuthOrigin="http://localhost:3101"
+        developerAppOrigin="http://localhost:3103"
+        demoOrigin="http://localhost:3102"
+      />
+    );
 
     await waitFor(() => {
       expect(screen.getByText("Signed in as dev@example.com")).toBeInTheDocument();
@@ -121,5 +122,77 @@ describe("DeveloperSetupConsole", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Hello Celeris Demo/ })).toBeInTheDocument();
     });
+  });
+
+  it("restores the dashboard token from the session cookie when sessionStorage is empty", async () => {
+    window.sessionStorage.clear();
+    document.cookie = "celeris_dashboard_session=token-cookie; Path=/; SameSite=Lax";
+
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            session: {
+              token: "token-cookie",
+              expiresAt: "2026-06-30T00:00:00.000Z",
+              clientKind: "developer_dashboard",
+              clientId: "celeris-dashboard",
+              appId: null,
+              user: {
+                id: "user_1",
+                email: "dev@example.com",
+                walletAddress: "0x2c45b9cf7d7c5fc33dbd0a1b5c14fffd7a74ac6f9ed6d7f2d881d7ec8e5a2011"
+              },
+              developerProfile: {
+                id: "profile_1",
+                email: "dev@example.com",
+                displayName: "Developer"
+              },
+              zkLogin: null
+            }
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            apps: []
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        )
+      );
+
+    render(
+      <DeveloperSetupConsole
+        apiOrigin="http://localhost:4100"
+        hostedAuthOrigin="http://localhost:3101"
+        developerAppOrigin="http://localhost:3103"
+        demoOrigin="http://localhost:3102"
+      />
+    );
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        new URL("/v1/me", "http://localhost:4100"),
+        expect.objectContaining({
+          headers: {
+            authorization: "Bearer token-cookie"
+          }
+        })
+      );
+    });
+
+    expect(window.sessionStorage.getItem("celeris.fs011.dashboard.token")).toBe("token-cookie");
   });
 });

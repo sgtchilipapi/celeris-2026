@@ -8,28 +8,76 @@ Fresh-start monorepo bootstrap for the Celeris MVP.
 - `npm run dev:all` starts local Postgres, waits for health, applies Prisma migrations, then starts the API, Next.js app, and `cloudflared` tunnel
 - `npm run build` builds every workspace
 - `npm run typecheck` runs TypeScript checks across the monorepo
-- `npm test` runs shared, API, and frontend smoke tests
+- `npm test` runs shared, browser SDK, API, and frontend smoke tests
 - `npm run prisma:generate` generates the Prisma client
 - `npm run prisma:migrate` runs `prisma migrate dev` from `packages/db`
 
+## MVP Surface Split
+
+- Revised target public origins:
+  - `https://app.celeris.pro` = Celeris dashboard/app for developers
+  - `https://demo.celeris.pro` = sample third-party SDK consumer app
+  - `https://auth.celeris.pro` = shared auth for developer sign-in and user login
+  - `https://api.celeris.pro` = backend API
+- The dashboard is intended to dogfood the same Google + zkLogin auth contract that Celeris exposes to app consumers.
+- The practical shape is one shared auth protocol with a reserved first-party dashboard client identity, not a separate dashboard login system and not a developer-created app record.
+- Developer authorization is layered on top of that shared auth flow; it is not intended to remain a separate credential system.
+- All three web surfaces stay on one `apps/web` Next.js deployment.
+- The developer setup console is anchored to the `app` surface, while the `demo` surface is reserved for the reference SDK consumer app.
+- `FS-02` extends the shared auth contract to app-scoped demo consumers through the browser SDK.
+- `FS-02.1` is complete: hosted auth now starts real Google OAuth, verifies Google ID tokens server-side, derives zkLogin wallet identity, and includes prover-backed zkLogin session material.
+
 ## FS-01 Developer Setup
 
-- The developer setup console lives at `/setup` in `apps/web`.
-- The API now exposes the `FS-01` developer routes for sign-up, sign-in, app creation, sponsor-wallet provisioning, program registration, and `say_hello` pricing.
+- The repo now exposes shared-auth dashboard and app-consumer routes for login-request creation, Google OAuth start/callback, token exchange, dashboard session lookup, app creation, sponsor-wallet provisioning, program registration, and `say_hello` pricing.
+- The developer dashboard now authenticates as the reserved first-party shared-auth client `developer_dashboard` / `celeris-dashboard`.
+- The reference demo app authenticates as an app-scoped consumer client through `app_consumer` / `<appId>`.
+- The browser SDK now implements `auth.startLogin`, `auth.handleRedirectCallback`, `auth.getSession`, and `auth.signOut` using session-scoped storage.
+- Production hosted auth no longer exposes the mock email identity form. The old login-request completion helper is confined behind an explicit test-only service flag.
 - API runtime config now also reads:
   - `CELERIS_APP_ENCRYPTION_KEY`
+  - `CELERIS_DEVELOPER_APP_ORIGIN`
+  - `CELERIS_DEMO_FRONTEND_ORIGIN`
   - `CELERIS_HOSTED_AUTH_ORIGIN`
+  - `CELERIS_GOOGLE_CLIENT_ID`
+  - `CELERIS_GOOGLE_CLIENT_SECRET`
+  - `CELERIS_GOOGLE_REDIRECT_URI`
+  - `CELERIS_GOOGLE_ISSUER`
+  - `CELERIS_ZKLOGIN_SALT_SEED`
+  - `CELERIS_ZKLOGIN_PROVER_ORIGIN`
+  - `CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW`
+- Web runtime config now also reads:
+  - `NEXT_PUBLIC_DEVELOPER_APP_ORIGIN`
+  - `NEXT_PUBLIC_DEMO_FRONTEND_ORIGIN`
+  - `NEXT_PUBLIC_HOSTED_AUTH_ORIGIN`
+  - `NEXT_PUBLIC_DEMO_APP_ID` for preconfiguring the reference consumer app
+
+## Real Google + zkLogin Auth
+
+- Hosted auth renders a Google sign-in action and redirects through `GET /v1/auth/google/start`.
+- Google returns to `CELERIS_GOOGLE_REDIRECT_URI`, which should point at `GET /v1/auth/google/callback` on the API origin.
+- The API verifies the Google ID token audience and issuer before resolving `UserIdentity`.
+- zkLogin salt is derived from `CELERIS_ZKLOGIN_SALT_SEED`, Google issuer, and Google subject, then used to derive the stable Sui wallet address.
+- Browser SDK auth creates zkLogin ephemeral key material in `sessionStorage` only and sends the nonce/public key/max epoch metadata in the login request.
+- The API calls `CELERIS_ZKLOGIN_PROVER_ORIGIN` during Google callback and returns the resulting proof inputs in the issued session.
 
 ## Cloudflare Tunnel Dev Routing
 
-- `npm run dev` assumes these public origins:
+- Current repo tunnel/dev scripts still assume these public origins:
   - `https://app.celeris.pro`
   - `https://auth.celeris.pro`
   - `https://api.celeris.pro`
-- Those map to local services like this:
+- The clarified target after `FS-01.1` is:
+  - `https://app.celeris.pro`
+  - `https://demo.celeris.pro`
+  - `https://auth.celeris.pro`
+  - `https://api.celeris.pro`
+- Target local mapping:
   - `app.celeris.pro` -> `http://localhost:3101`
+  - `demo.celeris.pro` -> `http://localhost:3101`
   - `auth.celeris.pro` -> `http://localhost:3101`
   - `api.celeris.pro` -> `http://localhost:4100`
+- `FS-01.1` expects local env values to keep those three web origins distinct even when they resolve to the same Next.js dev server.
 - The repo tunnel helper uses `CLOUDFLARED_TUNNEL_TOKEN` if it is set.
 - If that env var is not set, it falls back to the token embedded in the local `/etc/init.d/cloudflared` service install on this machine.
 

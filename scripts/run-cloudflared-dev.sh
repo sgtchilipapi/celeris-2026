@@ -4,7 +4,8 @@ set -euo pipefail
 
 API_PORT="${API_PORT:-4100}"
 WEB_PORT="${WEB_PORT:-3101}"
-APP_ORIGIN="${CELERIS_DEMO_FRONTEND_ORIGIN:-https://app.celeris.pro}"
+DEVELOPER_APP_ORIGIN="${CELERIS_DEVELOPER_APP_ORIGIN:-https://app.celeris.pro}"
+DEMO_FRONTEND_ORIGIN="${CELERIS_DEMO_FRONTEND_ORIGIN:-https://demo.celeris.pro}"
 AUTH_ORIGIN="${CELERIS_HOSTED_AUTH_ORIGIN:-https://auth.celeris.pro}"
 API_ORIGIN_VALUE="${API_ORIGIN:-https://api.celeris.pro}"
 
@@ -40,7 +41,8 @@ fi
 
 cat <<EOF
 Starting Cloudflare tunnel for:
-  ${APP_ORIGIN} -> http://localhost:${WEB_PORT}
+  ${DEVELOPER_APP_ORIGIN} -> http://localhost:${WEB_PORT}
+  ${DEMO_FRONTEND_ORIGIN} -> http://localhost:${WEB_PORT}
   ${AUTH_ORIGIN} -> http://localhost:${WEB_PORT}
   ${API_ORIGIN_VALUE} -> http://localhost:${API_PORT}
 EOF

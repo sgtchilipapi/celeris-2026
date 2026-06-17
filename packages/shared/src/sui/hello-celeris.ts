@@ -31,7 +31,7 @@ export interface HelloCelerisRegisteredProgramLike {
 
 export interface CanonicalHelloCelerisSayHelloTransactionParams {
   registeredProgram: HelloCelerisRegisteredProgramLike;
-  playerWalletAddress: string;
+  userWalletAddress: string;
   username: string;
   clockObjectId?: string;
 }
@@ -129,7 +129,7 @@ export function buildHelloCelerisSayHelloTransaction(params: HelloCelerisSayHell
 }
 
 export function buildCanonicalHelloCelerisSayHelloTransaction(params: CanonicalHelloCelerisSayHelloTransactionParams) {
-  const playerWalletAddress = parseSuiAddress(params.playerWalletAddress);
+  const userWalletAddress = parseSuiAddress(params.userWalletAddress);
   const built = buildHelloCelerisSayHelloTransaction({
     packageId: params.registeredProgram.packageId,
     appAuthorityCapObjectId: params.registeredProgram.authorityCapObjectId,
@@ -140,7 +140,7 @@ export function buildCanonicalHelloCelerisSayHelloTransaction(params: CanonicalH
 
   return {
     ...built,
-    playerWalletAddress
+    userWalletAddress
   };
 }
 

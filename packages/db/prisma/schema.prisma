@@ -29,21 +29,94 @@ model DeveloperSession {
   @@index([developerId])
 }
 
+model UserIdentity {
+  id            String             @id @default(cuid())
+  issuer        String
+  subject       String
+  email         String
+  displayName   String?
+  salt          String
+  walletAddress String
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  developerProfile DeveloperProfile?
+  sessions      UserSession[]
+
+  @@unique([issuer, subject])
+}
+
+model DeveloperProfile {
+  id             String       @id @default(cuid())
+  userIdentityId String       @unique
+  email          String       @unique
+  displayName    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  userIdentity   UserIdentity @relation(fields: [userIdentityId], references: [id], onDelete: Cascade)
+  apps           App[]
+}
+
+model AuthLoginRequest {
+  id          String   @id @default(cuid())
+  clientKind  String
+  clientId    String
+  appId       String?
+  state       String
+  oauthState  String?  @unique
+  redirectUri String
+  nonce       String?
+  extendedEphemeralPublicKey String?
+  maxEpoch    Int?
+  jwtRandomness String?
+  zkLoginProofInputsJson String?
+  status      String
+  authCode    String?  @unique
+  userIdentityId String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([clientKind, clientId])
+  @@index([userIdentityId])
+}
+
+model UserSession {
+  id             String       @id @default(cuid())
+  userIdentityId String
+  clientKind     String
+  clientId       String
+  appId          String?
+  walletAddress  String
+  chainId        String
+  tokenHash      String       @unique
+  zkLoginProofInputsJson String?
+  expiresAt      DateTime
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  userIdentity   UserIdentity @relation(fields: [userIdentityId], references: [id], onDelete: Cascade)
+
+  @@index([userIdentityId])
+  @@index([clientKind, clientId])
+}
+
 model App {
   id               String             @id @default(cuid())
-  developerId      String
+  developerId      String?
+  developerProfileId String?
   name             String
   slug             String             @unique
   allowedChainId   String
   authProvider     String
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
-  developer        DeveloperAccount   @relation(fields: [developerId], references: [id], onDelete: Cascade)
+  developer        DeveloperAccount?  @relation(fields: [developerId], references: [id], onDelete: Cascade)
+  developerProfile DeveloperProfile?  @relation(fields: [developerProfileId], references: [id], onDelete: SetNull)
   actions          ManagedAction[]
   sponsorWallets   SponsorWallet[]
   registeredPrograms RegisteredProgram[]
 
   @@index([developerId])
+  @@index([developerProfileId])
 }
 
 model ManagedAction {

@@ -111,18 +111,18 @@ describe("hello-celeris helpers", () => {
     ).toThrow(/does not exactly match/);
   });
 
-  it("accepts registered program metadata and player wallet context", () => {
+  it("accepts registered program metadata and user wallet context", () => {
     const built = buildCanonicalHelloCelerisSayHelloTransaction({
       registeredProgram: {
         packageId: PACKAGE_ID,
         authorityCapObjectId: APP_AUTHORITY_CAP_OBJECT_ID,
         appStateObjectId: APP_STATE_OBJECT_ID
       },
-      playerWalletAddress: "0xabc",
+      userWalletAddress: "0xabc",
       username: "  Sam  "
     });
 
-    expect(built.playerWalletAddress).toBe("0x0000000000000000000000000000000000000000000000000000000000000abc");
+    expect(built.userWalletAddress).toBe("0x0000000000000000000000000000000000000000000000000000000000000abc");
     expect(built.normalizedUsername).toBe("Sam");
     expect(built.message).toBe("Sam says Hello Celeris!");
   });

@@ -1,23 +1,50 @@
 interface HomeShellProps {
-  mode: "demo" | "hosted-auth";
+  mode: "developer-app" | "demo" | "hosted-auth";
   config: {
     apiOrigin: string;
     hostedAuthOrigin: string;
+    developerAppOrigin: string;
+    demoFrontendOrigin: string;
   };
 }
 
 export function HomeShell({ mode, config }: HomeShellProps) {
-  const isHostedAuth = mode === "hosted-auth";
+  const content = {
+    "developer-app": {
+      title: "Developer Dashboard Surface",
+      lede: "This origin hosts the Celeris dashboard and the developer setup console after shared auth completes.",
+      links: [
+        { href: "/", label: "Dashboard home" },
+        { href: "/setup", label: "Setup console" },
+        { href: config.hostedAuthOrigin, label: "Shared auth origin" }
+      ]
+    },
+    demo: {
+      title: "Hello Celeris Demo",
+      lede: "This origin is reserved for the SDK consumer app and no longer doubles as the developer setup surface.",
+      links: [
+        { href: config.demoFrontendOrigin, label: "Demo home" },
+        { href: config.developerAppOrigin, label: "Developer dashboard" },
+        { href: config.hostedAuthOrigin, label: "Shared auth origin" }
+      ]
+    },
+    "hosted-auth": {
+      title: "Shared Auth Surface",
+      lede: "This origin hosts the shared sign-in contract used by the first-party dashboard now and app consumers in the next slice.",
+      links: [
+        { href: "/sign-in", label: "Developer sign-in" },
+        { href: config.developerAppOrigin, label: "Developer dashboard" },
+        { href: config.demoFrontendOrigin, label: "Demo home" }
+      ]
+    }
+  }[mode];
 
   return (
     <main className="shell">
       <section className="hero">
         <p className="eyebrow">Celeris Fresh Start</p>
-        <h1>{isHostedAuth ? "Hosted Auth Shell" : "Demo App Shell"}</h1>
-        <p className="lede">
-          FS-00 bootstraps the public surfaces for the demo UI and hosted auth UI without pulling later-slice
-          product flows forward.
-        </p>
+        <h1>{content.title}</h1>
+        <p className="lede">{content.lede}</p>
       </section>
 
       <section className="panel">
@@ -28,25 +55,28 @@ export function HomeShell({ mode, config }: HomeShellProps) {
             <dd>{config.apiOrigin}</dd>
           </div>
           <div>
-            <dt>Hosted Auth Origin</dt>
+            <dt>Auth Origin</dt>
             <dd>{config.hostedAuthOrigin}</dd>
+          </div>
+          <div>
+            <dt>Dashboard Origin</dt>
+            <dd>{config.developerAppOrigin}</dd>
+          </div>
+          <div>
+            <dt>Demo Origin</dt>
+            <dd>{config.demoFrontendOrigin}</dd>
           </div>
         </dl>
       </section>
 
       <section className="panel">
-        <h2>Route Groups</h2>
+        <h2>Surface Links</h2>
         <ul>
-          <li>{isHostedAuth ? "This surface hosts Google auth flows in later slices." : "This surface hosts the player-facing demo app."}</li>
-          <li>
-            <a href="/">Demo shell</a>
-          </li>
-          <li>
-            <a href="/hosted-auth">Hosted auth shell</a>
-          </li>
-          <li>
-            <a href="/setup">Developer setup console</a>
-          </li>
+          {content.links.map((link) => (
+            <li key={link.label}>
+              <a href={link.href}>{link.label}</a>
+            </li>
+          ))}
         </ul>
       </section>
     </main>

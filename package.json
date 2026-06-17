@@ -7,12 +7,12 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently -n api,web,tunnel -c blue,green,magenta \"PORT=${API_PORT:-4100} API_ORIGIN=${API_ORIGIN:-https://api.celeris.pro} CELERIS_HOSTED_AUTH_ORIGIN=${CELERIS_HOSTED_AUTH_ORIGIN:-https://auth.celeris.pro} CELERIS_APP_ENCRYPTION_KEY=${CELERIS_APP_ENCRYPTION_KEY:-development-celeris-app-encryption-key} npm run dev --workspace @celeris/api\" \"PORT=${WEB_PORT:-3101} NEXT_PUBLIC_API_ORIGIN=${NEXT_PUBLIC_API_ORIGIN:-https://api.celeris.pro} NEXT_PUBLIC_HOSTED_AUTH_ORIGIN=${NEXT_PUBLIC_HOSTED_AUTH_ORIGIN:-https://auth.celeris.pro} npm run dev --workspace @celeris/web\" \"npm run dev:tunnel\"",
+    "dev": "bash ./scripts/run-dev-stack.sh",
     "dev:all": "bash ./scripts/run-dev-all.sh",
     "dev:tunnel": "bash ./scripts/run-cloudflared-dev.sh",
     "build": "npm run build --workspace @celeris/shared && npm run build --workspace @celeris/db && npm run build --workspace @celeris/sdk-browser && npm run build --workspace @celeris/sdk-server && npm run build --workspace @celeris/api && npm run build --workspace @celeris/web",
     "typecheck": "npm run typecheck --workspace @celeris/shared && npm run typecheck --workspace @celeris/db && npm run typecheck --workspace @celeris/sdk-browser && npm run typecheck --workspace @celeris/sdk-server && npm run typecheck --workspace @celeris/api && npm run typecheck --workspace @celeris/web",
-    "test": "npm run test --workspace @celeris/shared && npm run test --workspace @celeris/api && npm run test --workspace @celeris/web",
+    "test": "npm run test --workspace @celeris/shared && npm run test --workspace @celeris/sdk-browser && npm run test --workspace @celeris/api && npm run test --workspace @celeris/web",
     "prisma:generate": "npm run prisma:generate --workspace @celeris/db",
     "prisma:migrate": "npm run prisma:migrate --workspace @celeris/db",
     "postinstall": "npm run prisma:generate"

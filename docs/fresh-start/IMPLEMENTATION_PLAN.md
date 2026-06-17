@@ -18,9 +18,9 @@ Build the MVP as one clean, demoable Sui path:
 4. The developer manually registers the Sui IDs into Celeris through the documented walkthrough.
 5. The developer configures the paid `say_hello` action.
 6. A frontend app consumes the Celeris browser SDK.
-7. A player signs in with real Google + zkLogin.
-8. The player buys credits.
-9. The player executes sponsored `say_hello`.
+7. A user signs in with real Google + zkLogin.
+8. The user buys credits.
+9. The user executes sponsored `say_hello`.
 10. The app-wide transaction feed shows the result.
 
 ## Planning Rules
@@ -35,12 +35,17 @@ Build the MVP as one clean, demoable Sui path:
 
 These decisions make the MVP concrete and keep scope controlled:
 
-- Player auth is real Google OAuth plus zkLogin.
-- Developer auth is a simple email/password plus bearer-token flow for the MVP.
+- User auth is real Google OAuth plus zkLogin.
+- The developer dashboard also uses real Google OAuth plus zkLogin through the same shared auth contract.
+- The dashboard is a first-party auth client that consumes the same hosted auth flow as external app consumers.
+- The dashboard should authenticate through a reserved first-party client identity inside shared auth, not through a developer-created `App` record.
+- Developer authorization is layered on top of shared user auth through a first-party developer profile, not a separate credential system.
 - The purchase flow is a hosted mock checkout flow implemented by Celeris, backed by the real credit ledger.
-- One Next.js codebase serves two public surfaces:
-  - the demo frontend origin
-  - the hosted auth origin
+- One Next.js codebase serves three public surfaces:
+  - the developer dashboard origin
+  - the reference demo frontend origin
+  - the shared auth origin
+- For the clarified MVP target, those origins are `app.celeris.pro`, `demo.celeris.pro`, and `auth.celeris.pro`.
 - One Express service owns all JSON APIs and auth/session orchestration.
 - One Postgres database stores all runtime state.
 - The zkLogin prover is an external dependency reached by HTTP through `CELERIS_ZKLOGIN_PROVER_ORIGIN`.
@@ -51,7 +56,7 @@ These decisions make the MVP concrete and keep scope controlled:
 ```text
 apps/
   api/                  Express API
-  web/                  Next.js app for demo UI and hosted auth UI
+  web/                  Next.js app for developer dashboard, demo UI, and shared auth UI
 packages/
   db/                   Prisma schema, migrations, generated client
   shared/               shared types, zod schemas, Sui helpers, env parsing
@@ -69,29 +74,32 @@ docs/
 
 ### Public origins
 
+- `CELERIS_DEVELOPER_APP_ORIGIN`
+  - Next.js developer dashboard where the operator creates and configures apps
 - `CELERIS_DEMO_FRONTEND_ORIGIN`
-  - Next.js demo app where the player lands
+  - Next.js reference SDK consumer app where the user lands
 - `CELERIS_HOSTED_AUTH_ORIGIN`
-  - Next.js hosted auth UI for Google sign-in and redirect handling
+  - Next.js shared auth UI for the first-party dashboard client plus app-consumer Google sign-in and redirect handling
 - `API_ORIGIN`
   - Express JSON API
 
 ### Runtime responsibilities
 
 - Next.js owns:
-  - hosted auth pages
+  - developer dashboard pages
+  - shared auth pages
   - demo UI
   - mock checkout UI
   - callback pages that the browser SDK uses
 - Express owns:
   - developer API
-  - player API
+  - user API
   - Google OAuth orchestration
   - zkLogin proof and session orchestration
   - sponsor signing
   - reconciliation
 - Postgres owns:
-  - developer accounts
+  - developer profiles
   - app config
   - wallet and session state
   - credit ledger
@@ -108,8 +116,8 @@ docs/
 - Store credit amounts as integers.
 - Store Sui digests, object versions, gas prices, and epochs as strings where lossless integer handling matters.
 - Encrypt sponsor wallet secret material before persisting it.
-- Keep player session tokens and zkLogin ephemeral material out of `localStorage`.
-- Use `sessionStorage` for browser-side ephemeral zkLogin material and short-lived player auth state.
+- Keep user session tokens and zkLogin ephemeral material out of `localStorage`.
+- Use `sessionStorage` for browser-side ephemeral zkLogin material and short-lived user auth state.
 
 ## Additional Runtime Config
 
@@ -117,8 +125,7 @@ docs/
 
 - `DATABASE_URL`
 - `CELERIS_APP_ENCRYPTION_KEY`
-- `CELERIS_DEVELOPER_JWT_SECRET`
-- `CELERIS_PLAYER_JWT_SECRET`
+- `CELERIS_AUTH_TOKEN_SECRET`
 - `CELERIS_CHECKOUT_SUCCESS_URL`
 - `CELERIS_CHECKOUT_CANCEL_URL`
 
@@ -128,12 +135,10 @@ These additions do not change product scope. They exist so the runtime can persi
 
 ### Developer and app setup
 
-- `DeveloperAccount`
-  - `id`, `email`, `passwordHash`, timestamps
-- `DeveloperSession`
-  - `id`, `developerId`, `tokenHash`, `expiresAt`, timestamps
+- `DeveloperProfile`
+  - `id`, `userIdentityId`, `email`, `displayName`, timestamps
 - `App`
-  - `id`, `developerId`, `name`, `slug`, `allowedChainId`, `authProvider`, timestamps
+  - `id`, `developerProfileId`, `name`, `slug`, `allowedChainId`, `authProvider`, timestamps
 - `ManagedAction`
   - `id`, `appId`, `actionType`, `priceCredits`, `isEnabled`, timestamps
 - `SponsorWallet`
@@ -141,14 +146,20 @@ These additions do not change product scope. They exist so the runtime can persi
 - `RegisteredProgram`
   - `id`, `appId`, `chainFamily`, `network`, `packageId`, `appStateObjectId`, `authorityCapObjectId`, timestamps
 
-### Player auth and identity
+### User auth and identity
 
 - `AuthLoginRequest`
-  - `id`, `appId`, `nonce`, `state`, `redirectUri`, `extendedEphemeralPublicKey`, `maxEpoch`, `status`, `expiresAt`, timestamps
-- `PlayerIdentity`
+  - `id`, `clientKind`, `clientId`, `appId`, `nonce`, `state`, `redirectUri`, `extendedEphemeralPublicKey`, `maxEpoch`, `status`, `expiresAt`, timestamps
+- `UserIdentity`
   - `id`, `issuer`, `subject`, `salt`, `walletAddress`, timestamps
-- `PlayerSession`
-  - `id`, `playerIdentityId`, `appId`, `walletAddress`, `chainId`, `tokenHash`, `expiresAt`, timestamps
+- `UserSession`
+  - `id`, `userIdentityId`, `clientKind`, `clientId`, `appId`, `walletAddress`, `chainId`, `tokenHash`, `expiresAt`, timestamps
+
+Reserved first-party auth client:
+
+- the dashboard uses shared auth as `clientKind=developer_dashboard`
+- the dashboard uses a reserved `clientId` such as `celeris-dashboard`
+- dashboard auth must not depend on a developer-created `App` record existing first
 
 ### Credits and purchase flow
 
@@ -170,9 +181,8 @@ These additions do not change product scope. They exist so the runtime can persi
 
 ### Developer API
 
-- `POST /v1/developer/sign-up`
-- `POST /v1/developer/sign-in`
-- `POST /v1/developer/sign-out`
+- `GET /v1/developer/me`
+- `POST /v1/developer/profile`
 - `POST /v1/developer/apps`
 - `GET /v1/developer/apps`
 - `GET /v1/developer/apps/:appId`
@@ -182,7 +192,7 @@ These additions do not change product scope. They exist so the runtime can persi
 - `GET /v1/developer/apps/:appId/program`
 - `PUT /v1/developer/apps/:appId/actions/say_hello`
 
-### Player auth API
+### User auth API
 
 - `POST /v1/auth/login-requests`
 - `GET /v1/auth/google/start`
@@ -191,7 +201,7 @@ These additions do not change product scope. They exist so the runtime can persi
 - `POST /v1/auth/logout`
 - `GET /v1/me`
 
-### Player app API
+### User app API
 
 - `GET /v1/apps/:appId/catalog`
 - `GET /v1/apps/:appId/balance`
@@ -225,7 +235,7 @@ The SDK must own:
 - login-request creation
 - zkLogin ephemeral state generation
 - auth-code exchange
-- player bearer token storage in session-scoped storage
+- user bearer token storage in session-scoped storage
 - canonical `say_hello` transaction building
 - sponsored transaction submission
 - completion reporting
@@ -237,8 +247,8 @@ The server SDK is smaller and exists mainly to support developer provisioning ex
 Target API shape:
 
 - `createCelerisServerClient(config)`
-- `developers.signUp()`
-- `developers.signIn()`
+- `developers.getMe()`
+- `developers.ensureProfile()`
 - `apps.create()`
 - `apps.get()`
 - `apps.provisionSponsorWallet()`
@@ -295,8 +305,6 @@ A developer can create a new app, provision its sponsor wallet, register the Sui
 
 ### Database work
 
-- Add `DeveloperAccount`
-- Add `DeveloperSession`
 - Add `App`
 - Add `ManagedAction`
 - Add `SponsorWallet`
@@ -304,8 +312,7 @@ A developer can create a new app, provision its sponsor wallet, register the Sui
 
 ### Express work
 
-- Implement developer sign-up and sign-in.
-- Implement bearer-token auth middleware for developer routes.
+- Implement developer app routes behind an authenticated developer context.
 - Implement app creation and fetch routes.
 - Implement sponsor-wallet provisioning and read routes.
 - Implement program registration and read routes.
@@ -314,10 +321,8 @@ A developer can create a new app, provision its sponsor wallet, register the Sui
 
 ### Next.js work
 
-- Add a minimal setup console under a dedicated route group.
+- Add a minimal setup console for the developer app domain.
 - Allow a developer to:
-  - sign up
-  - sign in
   - create an app
   - provision a sponsor wallet
   - enter `packageId`, `appStateObjectId`, and `authorityCapObjectId`
@@ -336,7 +341,6 @@ A developer can create a new app, provision its sponsor wallet, register the Sui
 
 ### Test plan
 
-- developer sign-up and sign-in
 - app creation
 - sponsor-wallet provisioning is idempotent
 - malformed Sui IDs are rejected
@@ -345,37 +349,108 @@ A developer can create a new app, provision its sponsor wallet, register the Sui
 ### Exit criteria
 
 - A blank database can reach the state "brand new app created and configured in Celeris."
-- The frontend app has enough public config to proceed to player auth in the next slice.
+- The frontend app has enough public config to proceed to user auth in the next slice.
 
-## Slice 2: Hosted Player Auth and zkLogin Wallet Identity
+Follow-up note:
+
+- Slice 1 landed the developer app domain before the public surface split and shared-auth model were clarified.
+- Slice 1.1 closes that gap by making the dashboard consume shared Google + zkLogin auth, adding developer authorization, and separating the `app` and `demo` surfaces without pulling later payments or execution flows forward.
+
+## Slice 1.1: Developer Surface Realignment
 
 ### Goal
 
-A player can sign in with real Google auth on the hosted auth origin, return to the demo app, and see a stable zkLogin wallet address.
+Align the implemented developer setup flow with the clarified MVP surface model:
+
+- `app.celeris.pro` = Celeris developer dashboard
+- `demo.celeris.pro` = reference SDK consumer app
+- `auth.celeris.pro` = shared Google + zkLogin auth for developer sign-in and user login
+
+All three web surfaces remain served by the same Next.js codebase.
 
 ### Database work
 
-- Add `AuthLoginRequest`
-- Add `PlayerIdentity`
-- Add `PlayerSession`
+- Add `DeveloperProfile`.
+- Add `AuthLoginRequest`.
+- Add `UserIdentity`.
+- Add `UserSession`.
+- Replace the interim developer credential/session model with shared-auth-backed developer authorization.
+- Reserve a first-party dashboard auth client identity inside shared auth instead of treating the dashboard as a developer-created app consumer.
 
 ### Express work
 
-- Implement `POST /v1/auth/login-requests`.
-- Implement Google OAuth start and callback endpoints.
-- Implement Google ID-token verification using JWKS.
-- Implement stable salt derivation.
-- Implement zkLogin address derivation.
-- Implement prover adapter integration.
-- Implement auth-code exchange returning:
-  - player bearer token
-  - wallet identity
-  - zkLogin proof material needed for silent signing
-- Implement `GET /v1/me`.
+- Implement shared auth routes that the first-party dashboard consumes through the same hosted contract as external apps.
+- Reserve and validate the dashboard auth audience separately from app-scoped consumer audiences.
+- Implement Google OAuth start and callback endpoints for the dashboard auth client.
+- Implement token exchange and `GET /v1/me` for shared auth sessions.
+- Implement developer profile resolution or creation for authenticated dashboard users.
+- Implement `GET /v1/developer/me`.
+- Implement `POST /v1/developer/profile`.
+- Switch developer API auth from interim developer bearer sessions to shared user sessions plus developer authorization.
+- Distinguish developer-dashboard origin config from demo-frontend origin config where runtime values are exposed.
+- Ensure developer setup responses and provisioning guidance unambiguously point to the reference demo origin for user-facing SDK usage.
 
 ### Next.js work
 
-- Add hosted auth login page on the auth origin.
+- Add host-aware routing or equivalent surface segmentation inside `apps/web`.
+- Move the developer setup console onto the developer dashboard surface.
+- Make `app.celeris.pro/` show the developer dashboard when a valid shared-auth developer session exists, or redirect to auth when it does not.
+- Make `demo.celeris.pro/` show the Hello Celeris app home.
+- Preserve a separate demo surface as the reference SDK consumer shell without exposing developer setup as the primary user-facing entrypoint.
+- Add auth pages on `auth.celeris.pro` for the dashboard sign-in flow.
+
+### Shared and SDK work
+
+- Add explicit runtime config naming for developer app origin versus demo frontend origin.
+- Model the dashboard as a first-party auth client that uses the same hosted auth contract as third-party consumers.
+- Keep the dashboard on the same auth protocol while giving it a reserved first-party client identity.
+- Keep the public browser SDK config contract focused on the developer-owned frontend integration path.
+- Update any setup-console guidance or sample config generation so it remains clear which values belong to the developer dashboard, the reference demo app, and shared auth.
+
+### Test plan
+
+- host-based or surface-aware routing resolves the correct page for `app`, `demo`, and `auth`
+- dashboard auth redirects and returns correctly through the shared auth origin
+- shared auth distinguishes the reserved dashboard client from app-scoped consumer clients
+- developer profile bootstrap works for an authenticated dashboard user
+- the developer setup flow still works end to end on the developer dashboard surface
+- the demo surface no longer acts as the implicit home for developer setup
+- local dev routing docs and runtime config examples are consistent
+
+### Exit criteria
+
+- The developer setup console is clearly assigned to the app origin.
+- The demo origin is reserved for the reference SDK consumer app.
+- The auth origin is used for developer sign-in and future user auth through one shared Google + zkLogin contract.
+- `app.celeris.pro/` resolves to the dashboard or redirects to auth when unauthenticated.
+- `demo.celeris.pro/` resolves to the Hello Celeris home.
+- Authenticated dashboard users resolve to developer profiles without a separate credential system.
+- The shared auth contract treats the dashboard as a reserved first-party client identity, not as a developer-created app.
+- The public origin model and shared auth base are explicit enough for Slice 2 SDK-consumer auth work and later user flows.
+
+## Slice 2: SDK Consumer User Auth and zkLogin Wallet Identity
+
+### Goal
+
+A user can sign in from the reference demo app through the shared auth origin, return via the public browser SDK flow, and see a stable zkLogin wallet address.
+
+### Database work
+
+- No new core auth persistence model is expected.
+- Reuse the shared auth foundation from Slice 1.1.
+
+### Express work
+
+- Extend `POST /v1/auth/login-requests` for the reference demo app and external browser-SDK consumers.
+- Enforce app-scoped login-request validation, redirect URI validation, and auth audience checks for SDK consumers.
+- Ensure auth-code exchange returns:
+  - user bearer token
+  - wallet identity
+  - zkLogin proof material needed for silent signing
+- Reuse `GET /v1/me`, logout, and shared session validation for app consumers.
+
+### Next.js work
+
 - Add redirect/callback handling page on the demo origin.
 - Add signed-in header state showing wallet address.
 - Add logout flow.
@@ -386,27 +461,28 @@ A player can sign in with real Google auth on the hosted auth origin, return to 
 - Store ephemeral secret material in `sessionStorage`.
 - Start hosted login.
 - Handle callback completion.
-- Exchange auth code for player session.
-- Store the player bearer token in session-scoped storage.
+- Exchange auth code for user session.
+- Store the user bearer token in session-scoped storage.
 
 ### Test plan
 
 - same Google subject returns same wallet address across repeat logins
 - login-request expiry is enforced
 - redirect URI validation is enforced
+- app-scoped auth audience validation is enforced
 - browser storage does not persist sensitive material to `localStorage`
-- `/v1/me` reflects the authenticated player session
+- `/v1/me` reflects the authenticated user session
 
 ### Exit criteria
 
-- A player can sign in through the Next.js app and see the stable Sui wallet address.
+- A user can sign in through the Next.js app and see the stable Sui wallet address.
 - The browser SDK owns the full login flow.
 
 ## Slice 3: Credits and Purchase Flow
 
 ### Goal
 
-A signed-in player can buy credits through a hosted mock checkout flow and see the updated balance in the frontend app.
+A signed-in user can buy credits through a hosted mock checkout flow and see the updated balance in the frontend app.
 
 ### Database work
 
@@ -428,7 +504,7 @@ A signed-in player can buy credits through a hosted mock checkout flow and see t
 ### Next.js work
 
 - Add a hosted mock checkout page.
-- Redirect the player from the demo app to checkout and back.
+- Redirect the user from the demo app to checkout and back.
 - Refresh balance after checkout success.
 - Show action pricing from the catalog response.
 
@@ -447,13 +523,13 @@ A signed-in player can buy credits through a hosted mock checkout flow and see t
 
 ### Exit criteria
 
-- A signed-in player can buy credits and see the new balance without manual database changes.
+- A signed-in user can buy credits and see the new balance without manual database changes.
 
 ## Slice 4: Sponsored `say_hello` and Transaction Feed
 
 ### Goal
 
-A player with credits can execute `say_hello` on Sui testnet through the sponsored transaction flow and see the result in the app-wide feed.
+A user with credits can execute `say_hello` on Sui testnet through the sponsored transaction flow and see the result in the app-wide feed.
 
 ### Database work
 
@@ -516,7 +592,7 @@ A player with credits can execute `say_hello` on Sui testnet through the sponsor
 
 ### Exit criteria
 
-- A player can execute paid `say_hello` end to end.
+- A user can execute paid `say_hello` end to end.
 - The resulting transaction appears in the app-wide feed.
 
 ## Slice 5: SDK Consumer Hardening, Walkthrough, and Regression
@@ -527,7 +603,7 @@ Turn the reference implementation into a real developer-integration demo and fin
 
 ### Deliverables
 
-- The Next.js app consumes only public browser SDK APIs for player flows.
+- The Next.js app consumes only public browser SDK APIs for user flows.
 - The setup console and walkthrough support the end-to-end demo path.
 - Regression coverage exists for each major slice.
 - The manual Sui registration flow is documented step by step.
@@ -548,7 +624,7 @@ Turn the reference implementation into a real developer-integration demo and fin
 - Remove any remaining direct API plumbing from demo pages that bypasses the SDK.
 - Finalize UX for:
   - developer setup
-  - player sign-in
+  - user sign-in
   - purchase
   - `say_hello`
   - transaction feed
@@ -583,7 +659,7 @@ Turn the reference implementation into a real developer-integration demo and fin
 ### Test plan
 
 - API integration tests against a real Postgres test database
-- Playwright end-to-end tests for the Next.js setup and player flows
+- Playwright end-to-end tests for the Next.js setup and user flows
 - mocked automated tests for Google verifier, prover, and Sui RPC adapters
 - manual smoke test against real Google auth and Sui testnet
 
@@ -597,16 +673,18 @@ Turn the reference implementation into a real developer-integration demo and fin
 
 ## Authentication model
 
-- Developer auth and player auth are separate concerns.
-- Developer auth uses simple credentials plus bearer token.
-- Player auth uses Google OAuth plus zkLogin plus player bearer token.
-- Player identity is stable by `issuer + subject + salt -> walletAddress`.
+- The dashboard and app consumers share one Google + zkLogin auth contract on the auth origin.
+- The dashboard is a first-party auth client that uses the same hosted auth flow shape as external consumers.
+- The dashboard uses a reserved first-party client identity, while consumer apps use app-scoped client identities.
+- Developer authorization is layered on top of shared auth through `DeveloperProfile`.
+- User identity is stable by `issuer + subject + salt -> walletAddress`.
 
 ## Session model
 
-- Developer sessions are bearer tokens stored server-side as hashes.
-- Player sessions are bearer tokens stored server-side as hashes.
-- Browser-side player tokens are held in memory plus `sessionStorage`, never `localStorage`.
+- Shared auth sessions are bearer tokens stored server-side as hashes.
+- Sessions are scoped by client kind and client ID, plus app ID where relevant.
+- Dashboard sessions use the reserved dashboard client scope; consumer sessions use app-scoped client scopes.
+- Browser-side user tokens are held in memory plus `sessionStorage`, never `localStorage`.
 
 ## Secret handling
 
@@ -652,7 +730,7 @@ Manual smoke tests should cover:
 ### zkLogin flow complexity
 
 Risk:
-- hosted auth, prover inputs, and browser callback handling can drift if the browser SDK and API are built separately
+- shared auth, prover inputs, and browser callback handling can drift if the browser SDK and API are built separately
 
 Mitigation:
 - ship Slice 2 as one slice owned by both API and SDK changes
@@ -674,7 +752,7 @@ Risk:
 - callback URI and multi-origin auth setup is fragile
 
 Mitigation:
-- use one Next.js codebase with two local origins
+- use one Next.js codebase with three local origins
 - document exact localhost ports and Google callback URIs
 - keep callback handling in one place
 
@@ -691,15 +769,16 @@ Mitigation:
 
 The implementation is complete only when all of the following are true:
 
-- all six slices are complete
+- all seven slices are complete
 - the Move package is published and can be manually initialized
 - a brand new app can be created in Celeris from the setup console or developer API
+- the developer dashboard lives on the app origin while the reference consumer app lives on the demo origin
 - the sponsor wallet can be provisioned and funded
 - the Sui program can be manually registered against that app
-- the Next.js frontend app consumes the browser SDK for player flows
-- a player can sign in with real Google + zkLogin
-- a player can buy credits
-- a player can execute paid `say_hello`
+- the Next.js frontend app consumes the browser SDK for user flows
+- a user can sign in with real Google + zkLogin
+- a user can buy credits
+- a user can execute paid `say_hello`
 - the transaction feed renders the resulting entry with Explorer link
 - `npm run typecheck` passes
 - `npm test` passes

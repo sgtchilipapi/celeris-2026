@@ -10,3 +10,4 @@ packages/db/prisma/dev.db-journal
 apps/api/.env
 apps/web/.env
 .env
+.env.local

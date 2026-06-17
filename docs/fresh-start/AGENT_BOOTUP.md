@@ -37,6 +37,13 @@ The agent must carry these assumptions into the session unless the docs are expl
   - Postgres
   - Prisma
   - TypeScript
+- One Next.js codebase serves three public surfaces:
+  - `app.celeris.pro` for the Celeris developer dashboard
+  - `demo.celeris.pro` for the reference SDK consumer app
+  - `auth.celeris.pro` for shared auth
+- The developer dashboard consumes the same Google + zkLogin auth contract as app consumers through the auth origin.
+- The developer dashboard authenticates through that shared contract as a reserved first-party client identity, not as a developer-created app record.
+- Developer authorization is layered on top of shared auth; it is not a separate credential system.
 - The browser frontend must consume the Celeris browser SDK through its public API.
 - Real Google OAuth plus zkLogin is part of the MVP.
 - Credits and purchase flow are part of the MVP.
@@ -80,7 +87,7 @@ After reading the docs, before implementation starts, the agent should respond w
 - Delivery model:
   - vertical slice
 - Current sequence:
-  - `FS-00` through `FS-05`
+  - `FS-00`, `FS-01`, `FS-01.1`, `FS-02` through `FS-05`
 - Active work order:
   - `FS-XX` if provided, otherwise "not assigned yet"
 - Dependency check:

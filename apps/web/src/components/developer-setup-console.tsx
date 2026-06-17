@@ -10,24 +10,21 @@ import {
   type DeveloperApp,
   developerAppListResponseSchema,
   developerAppResponseSchema,
-  developerSessionResponseSchema,
   managedActionResponseSchema,
+  meResponseSchema,
   registerProgramSchema,
   registeredProgramResponseSchema,
   sponsorWalletResponseSchema
 } from "@celeris/shared";
 
-const developerTokenStorageKey = "celeris.fs01.developer.token";
-const developerEmailStorageKey = "celeris.fs01.developer.email";
+const developerTokenStorageKey = "celeris.fs011.dashboard.token";
+const developerTokenCookieName = "celeris_dashboard_session";
 
 interface DeveloperSetupConsoleProps {
   apiOrigin: string;
   hostedAuthOrigin: string;
-}
-
-interface AuthFormState {
-  email: string;
-  password: string;
+  developerAppOrigin: string;
+  demoOrigin: string;
 }
 
 interface ProgramFormState {
@@ -45,14 +42,32 @@ function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Request failed";
 }
 
-export function DeveloperSetupConsole({ apiOrigin, hostedAuthOrigin }: DeveloperSetupConsoleProps) {
-  const [authMode, setAuthMode] = useState<"sign-up" | "sign-in">("sign-up");
-  const [authForm, setAuthForm] = useState<AuthFormState>({
-    email: "",
-    password: ""
-  });
+function readCookie(name: string) {
+  const cookies = document.cookie
+    .split(";")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  for (const cookie of cookies) {
+    const [cookieName, ...rest] = cookie.split("=");
+
+    if (cookieName === name) {
+      return rest.join("=");
+    }
+  }
+
+  return null;
+}
+
+export function DeveloperSetupConsole({
+  apiOrigin,
+  hostedAuthOrigin,
+  developerAppOrigin,
+  demoOrigin
+}: DeveloperSetupConsoleProps) {
   const [token, setToken] = useState<string | null>(null);
   const [developerEmail, setDeveloperEmail] = useState<string>("");
+  const [developerWalletAddress, setDeveloperWalletAddress] = useState<string>("");
   const [apps, setApps] = useState<DeveloperApp[]>([]);
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
   const [newAppName, setNewAppName] = useState("Hello Celeris Demo");
@@ -66,7 +81,7 @@ export function DeveloperSetupConsole({ apiOrigin, hostedAuthOrigin }: Developer
     isEnabled: true
   });
   const [isBusy, setIsBusy] = useState(false);
-  const [statusMessage, setStatusMessage] = useState("Sign in or sign up to start the setup flow.");
+  const [statusMessage, setStatusMessage] = useState("Developer dashboard ready.");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const selectedApp = useMemo(
@@ -75,15 +90,12 @@ export function DeveloperSetupConsole({ apiOrigin, hostedAuthOrigin }: Developer
   );
 
   useEffect(() => {
-    const storedToken = window.sessionStorage.getItem(developerTokenStorageKey);
-    const storedEmail = window.sessionStorage.getItem(developerEmailStorageKey);
+    const storedToken =
+      window.sessionStorage.getItem(developerTokenStorageKey) ?? readCookie(developerTokenCookieName);
 
     if (storedToken) {
+      window.sessionStorage.setItem(developerTokenStorageKey, storedToken);
       setToken(storedToken);
-    }
-
-    if (storedEmail) {
-      setDeveloperEmail(storedEmail);
     }
   }, []);
 
@@ -92,6 +104,7 @@ export function DeveloperSetupConsole({ apiOrigin, hostedAuthOrigin }: Developer
       return;
     }
 
+    void loadSession(token);
     void loadApps(token);
   }, [token]);
 
@@ -139,6 +152,28 @@ export function DeveloperSetupConsole({ apiOrigin, hostedAuthOrigin }: Developer
     return parser.parse(payload);
   }
 
+  async function loadSession(activeToken: string) {
+    try {
+      const response = await fetch(new URL("/v1/me", apiOrigin), {
+        headers: {
+          authorization: `Bearer ${activeToken}`
+        }
+      });
+      const payload = (await response.json()) as unknown;
+
+      if (!response.ok) {
+        throw new Error("Failed to load dashboard session");
+      }
+
+      const parsed = meResponseSchema.parse(payload);
+      setDeveloperEmail(parsed.session.user.email);
+      setDeveloperWalletAddress(parsed.session.user.walletAddress);
+      setErrorMessage(null);
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    }
+  }
+
   async function loadApps(activeToken: string) {
     try {
       const response = await fetch(new URL("/v1/developer/apps", apiOrigin), {
@@ -173,37 +208,6 @@ export function DeveloperSetupConsole({ apiOrigin, hostedAuthOrigin }: Developer
     setSelectedAppId(updatedApp.appId);
   }
 
-  async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setIsBusy(true);
-    setErrorMessage(null);
-
-    try {
-      const response = await request(
-        authMode === "sign-up" ? "/v1/developer/sign-up" : "/v1/developer/sign-in",
-        {
-          method: "POST",
-          body: JSON.stringify(authForm)
-        },
-        developerSessionResponseSchema
-      );
-
-      window.sessionStorage.setItem(developerTokenStorageKey, response.token);
-      window.sessionStorage.setItem(developerEmailStorageKey, response.developer.email);
-      setToken(response.token);
-      setDeveloperEmail(response.developer.email);
-      setStatusMessage(`${authMode === "sign-up" ? "Created" : "Loaded"} developer session.`);
-      setAuthForm((current) => ({
-        ...current,
-        password: ""
-      }));
-    } catch (error) {
-      setErrorMessage(toErrorMessage(error));
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
   async function handleSignOut() {
     if (!token) {
       return;
@@ -214,7 +218,7 @@ export function DeveloperSetupConsole({ apiOrigin, hostedAuthOrigin }: Developer
 
     try {
       await request(
-        "/v1/developer/sign-out",
+        "/v1/auth/logout",
         {
           method: "POST"
         },
@@ -224,12 +228,8 @@ export function DeveloperSetupConsole({ apiOrigin, hostedAuthOrigin }: Developer
       );
 
       window.sessionStorage.removeItem(developerTokenStorageKey);
-      window.sessionStorage.removeItem(developerEmailStorageKey);
-      setToken(null);
-      setDeveloperEmail("");
-      setApps([]);
-      setSelectedAppId(null);
-      setStatusMessage("Developer session cleared.");
+      document.cookie = `${developerTokenCookieName}=; Path=/; Max-Age=0; SameSite=Lax`;
+      window.location.href = new URL("/", developerAppOrigin).toString();
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     } finally {
@@ -377,21 +377,29 @@ export function DeveloperSetupConsole({ apiOrigin, hostedAuthOrigin }: Developer
     <main className="workspace">
       <section className="workspace-header">
         <div>
-          <p className="workspace-kicker">FS-01 Developer App Setup</p>
-          <h1>Developer setup console</h1>
+          <p className="workspace-kicker">FS-01.1 Developer Surface Realignment</p>
+          <h1>Developer dashboard</h1>
           <p className="workspace-copy">
-            Create an app, provision the sponsor wallet, register the Hello Celeris package IDs, and configure
-            `say_hello` pricing.
+            Shared auth is hosted on the auth origin. This dashboard is the reserved first-party client and the demo
+            origin is now kept for the SDK consumer app.
           </p>
         </div>
         <dl className="runtime-grid">
           <div>
-            <dt>API origin</dt>
-            <dd>{apiOrigin}</dd>
+            <dt>Dashboard origin</dt>
+            <dd>{developerAppOrigin}</dd>
           </div>
           <div>
-            <dt>Hosted auth origin</dt>
+            <dt>Demo origin</dt>
+            <dd>{demoOrigin}</dd>
+          </div>
+          <div>
+            <dt>Auth origin</dt>
             <dd>{hostedAuthOrigin}</dd>
+          </div>
+          <div>
+            <dt>API origin</dt>
+            <dd>{apiOrigin}</dd>
           </div>
         </dl>
       </section>
@@ -399,60 +407,24 @@ export function DeveloperSetupConsole({ apiOrigin, hostedAuthOrigin }: Developer
       <section className="workspace-band">
         <div className="band-header">
           <div>
-            <h2>Developer auth</h2>
-            <p>{developerEmail ? `Signed in as ${developerEmail}` : "Create a developer session for this console."}</p>
+            <h2>Developer session</h2>
+            <p>{developerEmail ? `Signed in as ${developerEmail}` : "Waiting for dashboard session."}</p>
           </div>
-          {token ? (
-            <button className="button secondary" onClick={handleSignOut} type="button" disabled={isBusy}>
-              Sign out
-            </button>
-          ) : null}
-        </div>
-
-        <div className="segmented-control" role="tablist" aria-label="Auth mode">
-          <button
-            aria-selected={authMode === "sign-up"}
-            className={`segment${authMode === "sign-up" ? " active" : ""}`}
-            onClick={() => setAuthMode("sign-up")}
-            type="button"
-          >
-            Sign up
-          </button>
-          <button
-            aria-selected={authMode === "sign-in"}
-            className={`segment${authMode === "sign-in" ? " active" : ""}`}
-            onClick={() => setAuthMode("sign-in")}
-            type="button"
-          >
-            Sign in
+          <button className="button secondary" onClick={handleSignOut} type="button" disabled={isBusy || !token}>
+            Sign out
           </button>
         </div>
 
-        <form className="form-grid" onSubmit={handleAuthSubmit}>
-          <label>
-            <span>Email</span>
-            <input
-              autoComplete="email"
-              name="email"
-              onChange={(event) => setAuthForm((current) => ({ ...current, email: event.target.value }))}
-              type="email"
-              value={authForm.email}
-            />
-          </label>
-          <label>
-            <span>Password</span>
-            <input
-              autoComplete={authMode === "sign-up" ? "new-password" : "current-password"}
-              name="password"
-              onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))}
-              type="password"
-              value={authForm.password}
-            />
-          </label>
-          <button className="button" disabled={isBusy} type="submit">
-            {authMode === "sign-up" ? "Create developer" : "Open developer session"}
-          </button>
-        </form>
+        <dl className="runtime-grid">
+          <div>
+            <dt>Email</dt>
+            <dd>{developerEmail || "Unavailable"}</dd>
+          </div>
+          <div>
+            <dt>Wallet</dt>
+            <dd>{developerWalletAddress || "Unavailable"}</dd>
+          </div>
+        </dl>
       </section>
 
       <section className="workspace-grid">
@@ -467,15 +439,9 @@ export function DeveloperSetupConsole({ apiOrigin, hostedAuthOrigin }: Developer
           <form className="form-grid compact" onSubmit={handleCreateApp}>
             <label>
               <span>App name</span>
-              <input
-                disabled={!token}
-                name="name"
-                onChange={(event) => setNewAppName(event.target.value)}
-                type="text"
-                value={newAppName}
-              />
+              <input name="name" onChange={(event) => setNewAppName(event.target.value)} type="text" value={newAppName} />
             </label>
-            <button className="button" disabled={!token || isBusy} type="submit">
+            <button className="button" disabled={isBusy || !token} type="submit">
               Create app
             </button>
           </form>

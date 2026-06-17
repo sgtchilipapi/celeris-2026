@@ -2,19 +2,26 @@
 
 Build a clean, single-path "Celeris" MVP. Assume the repo starts from only the necessary env/runtime contract plus the in-repo `hello_celeris` Move package. Everything else should be implemented only to support one canonical demo: a brand new app is created in Celeris, manually connected to a deployed Sui package through a documented walkthrough, then used by a user who signs in with real Google + zkLogin, buys credits, and executes paid `say_hello` on Sui testnet.
 
+For the MVP, Celeris owns three public web surfaces that are split by origin but served from one Next.js codebase:
+
+- `app.celeris.pro` for the Celeris developer dashboard
+- `demo.celeris.pro` for the Celeris-owned reference SDK consumer app
+- `auth.celeris.pro` for shared auth
+
 ## Product Goal
 
 The MVP must prove this full story end to end:
 
-1. A developer creates a new app in Celeris.
-2. Celeris provisions a sponsor wallet for that app.
-3. The developer publishes the in-repo Move package, runs `initialize_app`, and manually registers the resulting Sui IDs into Celeris using a walkthrough.
-4. The developer configures the paid `say_hello` action.
-5. The developer consumes the Celeris browser SDK in its frontend app and configures it for the new app.
-6. A user signs in through hosted Google auth and gets a stable zkLogin Sui wallet.
-7. The user buys credits.
-8. The user executes `say_hello` through a sponsored transaction flow.
-9. The app-wide transaction feed shows the recorded result with a Sui Explorer link.
+1. A developer signs in to Celeris through shared Google + zkLogin auth and lands in the dashboard.
+2. The developer creates a new app in Celeris.
+3. Celeris provisions a sponsor wallet for that app.
+4. The developer publishes the in-repo Move package, runs `initialize_app`, and manually registers the resulting Sui IDs into Celeris using a walkthrough.
+5. The developer configures the paid `say_hello` action.
+6. The developer consumes the Celeris browser SDK in its frontend app and configures it for the new app.
+7. A user signs in through hosted Google auth and gets a stable zkLogin Sui wallet.
+8. The user buys credits.
+9. The user executes `say_hello` through a sponsored transaction flow.
+10. The app-wide transaction feed shows the recorded result with a Sui Explorer link.
 
 ## Scope
 
@@ -24,7 +31,13 @@ The MVP must prove this full story end to end:
 - One sponsor wallet per app.
 - One registered Sui package per app.
 - One managed paid action: `say_hello`.
+- One developer dashboard surface for app setup and configuration.
+- One developer authorization model layered on top of shared user auth.
 - One canonical developer integration path where the frontend app consumes the Celeris browser SDK.
+- One Celeris-owned reference consumer app surface that behaves like a third-party SDK integration.
+- One shared auth surface used for developer sign-in and hosted user auth.
+- One first-party dashboard auth client that consumes the same hosted auth contract as third-party apps.
+- The dashboard auth client is a reserved first-party client identity inside shared auth, not a developer-created app record.
 - One user demo UI with wallet, credits, username input, purchase flow, execute button, and app-wide feed.
 - One manual walkthrough for package publish, app initialization, registration, and demo run.
 
@@ -53,7 +66,11 @@ The MVP must prove this full story end to end:
 ## System Responsibilities
 
 - The browser SDK creates zkLogin ephemeral state before hosted auth begins.
-- Hosted auth runs on the Celeris auth origin and uses real Google account selection.
+- The auth origin hosts one shared auth contract for both the first-party dashboard and app consumers.
+- The developer dashboard consumes that auth contract as a first-party client, not through a separate bespoke login system.
+- The dashboard uses the same auth start, callback, token, and session contract as app consumers, but under a reserved first-party client identity such as `clientKind=developer_dashboard` and `clientId=celeris-dashboard`.
+- The backend resolves or creates the developer authorization record after shared auth for dashboard access.
+- Hosted user auth on the auth origin uses real Google account selection.
 - The backend verifies the Google identity token, resolves a stable user salt, derives the zkLogin Sui address, gets proof inputs, and issues the user session.
 - The browser SDK builds the canonical `say_hello` `TransactionKind`.
 - The backend rebuilds and validates the same canonical transaction before sponsorship.
@@ -64,24 +81,29 @@ The MVP must prove this full story end to end:
 
 ## Developer Flow
 
-1. Create a new Celeris app with `allowedChainId = sui:testnet` and `authProvider = zklogin`.
-2. Provision the sponsor wallet through the developer API.
-3. Fund the sponsor wallet with testnet SUI.
-4. Publish the Move package manually.
-5. Call `initialize_app` manually and record:
+1. Visit `app.celeris.pro`.
+2. If unauthenticated, redirect to `auth.celeris.pro` and complete shared Google + zkLogin sign-in.
+3. Return to the developer dashboard with a valid Celeris user session and developer authorization.
+4. Create a new Celeris app with `allowedChainId = sui:testnet` and `authProvider = zklogin`.
+5. Provision the sponsor wallet through the developer API.
+6. Fund the sponsor wallet with testnet SUI.
+7. Publish the Move package manually.
+8. Call `initialize_app` manually and record:
    - `packageId`
    - `appStateObjectId`
    - `authorityCapObjectId`
-6. Register those Sui IDs against the app through the developer API.
-7. Configure the `say_hello` action cost in credits.
-8. Consume the Celeris browser SDK in the frontend app and configure it with the app's public runtime values.
-9. Launch the user demo.
+9. Register those Sui IDs against the app through the developer API.
+10. Configure the `say_hello` action cost in credits.
+11. Consume the Celeris browser SDK in the frontend app and configure it with the app's public runtime values.
+12. Launch the reference demo consumer app on the demo origin.
+
+Unauthenticated developer visits to the app origin should redirect to the auth origin for sign-in.
 
 The Sui registration step must not be auto-orchestrated. The repo must include a walkthrough with exact manual steps and example commands.
 
-## user Flow
+## User Flow
 
-1. Open the demo frontend for the newly created app.
+1. Open the reference demo frontend for the newly created app on the demo origin.
 2. Start hosted sign-in.
 3. Complete real Google auth on the Celeris auth origin.
 4. Return with a valid Celeris user session tied to a stable zkLogin Sui address.
@@ -97,6 +119,7 @@ The Sui registration step must not be auto-orchestrated. The repo must include a
 - `CELERIS_GOOGLE_CLIENT_SECRET`
 - `CELERIS_GOOGLE_ISSUER`
 - `CELERIS_SESSION_SECRET`
+- `CELERIS_DEVELOPER_APP_ORIGIN`
 - `CELERIS_HOSTED_AUTH_ORIGIN`
 - `CELERIS_DEMO_FRONTEND_ORIGIN`
 - `CELERIS_ZKLOGIN_SALT_SEED`
@@ -108,16 +131,23 @@ The repo should fail closed when required auth, session, prover, or RPC env valu
 
 ## Core Backend Models
 
+- `DeveloperProfile`
+  - `developerProfileId`, `userIdentityId`, timestamps
 - `App`
-  - `appId`, `name`, `allowedChainId`, `authProvider`, timestamps
+  - `appId`, `developerProfileId`, `name`, `allowedChainId`, `authProvider`, timestamps
 - `RegisteredProgram`
   - `appId`, `chainFamily`, `network`, `packageId`, `appStateObjectId`, `authorityCapObjectId`, timestamps
 - `SponsorWallet`
   - `appId`, `chainFamily`, `network`, `address`, timestamps
 - `SponsorWalletSecret`
   - stored privately and never returned from APIs
+- `UserIdentity`
+  - `userIdentityId`, `issuer`, `subject`, `salt`, `walletAddress`, timestamps
+- `AuthLoginRequest`
+  - `loginRequestId`, `clientKind`, `clientId`, `redirectUri`, auth metadata, zkLogin ephemeral metadata, expiry, status
+  - reserves a first-party dashboard client identity separately from app-scoped consumer clients
 - `userSession`
-  - `userId`, `walletAddress`, `chainId`, auth/session metadata, zkLogin session material needed by the browser
+  - `userId`, `walletAddress`, `chainId`, `clientKind`, `clientId`, auth/session metadata, zkLogin session material needed by the browser
 - `CreditLedgerEntry`
   - purchase, reserve, capture, release events
 - `PendingActionReservation`
@@ -128,6 +158,8 @@ The repo should fail closed when required auth, session, prover, or RPC env valu
 ## API Contract
 
 - Developer API:
+  - `GET /v1/developer/me`
+  - `POST /v1/developer/profile`
   - `POST /v1/developer/apps`
   - `GET /v1/developer/apps/:appId`
   - `POST /v1/developer/apps/:appId/sponsor-wallet`
@@ -169,7 +201,7 @@ The repo should fail closed when required auth, session, prover, or RPC env valu
 The repo must include one clear manual walkthrough covering:
 
 1. Required env setup.
-2. Starting the API and hosted auth.
+2. Starting the API and the Next.js public surfaces.
 3. Creating a new app.
 4. Provisioning and funding the sponsor wallet.
 5. Publishing the Move package.
@@ -182,7 +214,11 @@ The repo must include one clear manual walkthrough covering:
 
 ## Acceptance Criteria
 
+- A developer can sign in through shared Google + zkLogin auth and reach the dashboard.
 - A new app can be created in Celeris and fully configured for the demo.
+- The developer dashboard is served on the app origin, the reference consumer app is served on the demo origin, and shared auth is served on the auth origin through one Next.js codebase.
+- Unauthenticated developer visits to `app.celeris.pro/` redirect to auth, while `demo.celeris.pro/` opens the Hello Celeris home.
+- The dashboard consumes the same hosted auth contract as app consumers, while developer authorization remains a first-party concern and the dashboard remains a reserved first-party auth client rather than a developer-created app.
 - Sponsor wallet creation is idempotent and returns a stable public address.
 - The Move package publishes successfully and `initialize_app` produces the required objects.
 - Manual registration of the Sui package into Celeris succeeds through the documented flow.
@@ -196,10 +232,11 @@ The repo must include one clear manual walkthrough covering:
 ## Implementation Order
 
 1. Add the Move package and shared Sui transaction helpers.
-2. Implement hosted Google auth, zkLogin address derivation, proof handling, and user session issuance.
-3. Implement developer app creation, sponsor-wallet provisioning, and program registration.
-4. Implement credits and purchase flow.
-5. Implement sponsored `say_hello` execution, completion, and reconciliation.
-6. Implement the browser SDK flow for silent zkLogin signing and submission.
-7. Implement the simplified frontend app that consumes the browser SDK.
-8. Write the manual walkthrough and end-to-end verification steps.
+2. Implement developer app creation, sponsor-wallet provisioning, and program registration.
+3. Realign the `app`, `demo`, and `auth` web surfaces and make the dashboard consume shared Google + zkLogin auth as a first-party client.
+4. Extend the shared auth flow to the reference consumer app and browser SDK.
+5. Implement credits and purchase flow.
+6. Implement sponsored `say_hello` execution, completion, and reconciliation.
+7. Implement the browser SDK flow for silent zkLogin signing and submission.
+8. Implement the reference consumer app that consumes the browser SDK.
+9. Write the manual walkthrough and end-to-end verification steps.

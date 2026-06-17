@@ -1,14 +1,17 @@
 import {
-  type ConfigureSayHelloInput,
-  type CreateDeveloperAppInput,
-  type DeveloperCredentials,
+  authLoginRequestResponseSchema,
+  authSessionResponseSchema,
   developerAppListResponseSchema,
   developerAppResponseSchema,
-  developerSessionResponseSchema,
+  developerProfileResponseSchema,
   managedActionResponseSchema,
+  meResponseSchema,
   registerProgramSchema,
+  registeredProgramResponseSchema,
   sponsorWalletResponseSchema,
-  registeredProgramResponseSchema
+  type ConfigureSayHelloInput,
+  type CreateAuthLoginRequestInput,
+  type CreateDeveloperAppInput
 } from "@celeris/shared";
 
 export interface CelerisServerClientConfig {
@@ -77,31 +80,60 @@ function withToken(config: CelerisServerClientOptions, token: string) {
 export function createCelerisServerClient(config: CelerisServerClientConfig) {
   return {
     config,
-    developers: {
-      signUp: async (input: DeveloperCredentials) =>
+    auth: {
+      createLoginRequest: async (input: CreateAuthLoginRequestInput) =>
         requestJson(
           config,
-          "/v1/developer/sign-up",
+          "/v1/auth/login-requests",
           {
             method: "POST",
             body: JSON.stringify(input)
           },
-          developerSessionResponseSchema
+          authLoginRequestResponseSchema
         ),
-      signIn: async (input: DeveloperCredentials) =>
+      exchangeToken: async (input: { code: string; state: string; email: string }) =>
         requestJson(
           config,
-          "/v1/developer/sign-in",
+          "/v1/auth/token",
           {
             method: "POST",
             body: JSON.stringify(input)
           },
-          developerSessionResponseSchema
+          authSessionResponseSchema
+        ),
+      getMe: async () =>
+        requestJson(
+          config,
+          "/v1/me",
+          {
+            method: "GET"
+          },
+          meResponseSchema
         ),
       signOut: async () =>
-        requestEmpty(config, "/v1/developer/sign-out", {
+        requestEmpty(config, "/v1/auth/logout", {
           method: "POST"
         })
+    },
+    developers: {
+      getMe: async () =>
+        requestJson(
+          config,
+          "/v1/developer/me",
+          {
+            method: "GET"
+          },
+          developerProfileResponseSchema
+        ),
+      ensureProfile: async () =>
+        requestJson(
+          config,
+          "/v1/developer/profile",
+          {
+            method: "POST"
+          },
+          developerProfileResponseSchema
+        )
     },
     apps: {
       list: async () =>
