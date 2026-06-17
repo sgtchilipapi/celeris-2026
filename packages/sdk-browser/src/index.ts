@@ -41,8 +41,63 @@ export interface StartCheckoutOptions {
   cancelRedirectUrl?: string;
 }
 
+export class CelerisBrowserSdkError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly status?: number
+  ) {
+    super(message);
+    this.name = "CelerisBrowserSdkError";
+  }
+}
+
+export class CelerisAuthError extends CelerisBrowserSdkError {
+  constructor(message: string, status?: number) {
+    super(message, "auth_failure", status);
+    this.name = "CelerisAuthError";
+  }
+}
+
+export class CelerisInsufficientCreditsError extends CelerisBrowserSdkError {
+  constructor(message = "Insufficient credits", status?: number) {
+    super(message, "insufficient_credits", status);
+    this.name = "CelerisInsufficientCreditsError";
+  }
+}
+
+export class CelerisSponsorshipError extends CelerisBrowserSdkError {
+  constructor(message: string, status?: number) {
+    super(message, "sponsorship_failure", status);
+    this.name = "CelerisSponsorshipError";
+  }
+}
+
+export class CelerisTransactionVerificationError extends CelerisBrowserSdkError {
+  constructor(message: string, status?: number) {
+    super(message, "transaction_verification_failure", status);
+    this.name = "CelerisTransactionVerificationError";
+  }
+}
+
 const sessionStorageKeyPrefix = "celeris.auth.session";
 const ephemeralStorageKeyPrefix = "celeris.zklogin.ephemeral";
+
+function normalizeConfig(config: CelerisBrowserClientConfig): CelerisBrowserClientConfig {
+  const normalized = {
+    appId: config.appId.trim(),
+    apiOrigin: new URL(config.apiOrigin).origin,
+    hostedAuthOrigin: new URL(config.hostedAuthOrigin).origin,
+    redirectUri: new URL(config.redirectUri).toString(),
+    suiRpcOrigin: config.suiRpcOrigin ? new URL(config.suiRpcOrigin).toString() : undefined
+  };
+
+  if (!normalized.appId) {
+    throw new CelerisBrowserSdkError("Celeris appId is required", "invalid_config");
+  }
+
+  return normalized;
+}
 
 function getSessionStorage() {
   if (typeof window === "undefined" || !window.sessionStorage) {
@@ -94,7 +149,32 @@ async function resolveMaxEpoch(suiRpcOrigin?: string) {
   return epoch + 2;
 }
 
-async function requestJson<T>(url: URL, init: RequestInit, parser: { parse: (value: unknown) => T }) {
+function createRequestError(message: string, status: number, context?: "auth" | "sponsorship" | "verification") {
+  if (status === 401 || status === 403 || context === "auth") {
+    return new CelerisAuthError(message, status);
+  }
+
+  if (/insufficient credits/i.test(message)) {
+    return new CelerisInsufficientCreditsError(message, status);
+  }
+
+  if (context === "verification") {
+    return new CelerisTransactionVerificationError(message, status);
+  }
+
+  if (context === "sponsorship") {
+    return new CelerisSponsorshipError(message, status);
+  }
+
+  return new CelerisBrowserSdkError(message, "request_failed", status);
+}
+
+async function requestJson<T>(
+  url: URL,
+  init: RequestInit,
+  parser: { parse: (value: unknown) => T },
+  context?: "auth" | "sponsorship" | "verification"
+) {
   const response = await fetch(url, {
     ...init,
     headers: {
@@ -110,13 +190,14 @@ async function requestJson<T>(url: URL, init: RequestInit, parser: { parse: (val
         ? payload.error
         : `Request failed with status ${response.status}`;
 
-    throw new Error(message);
+    throw createRequestError(message, response.status, context);
   }
 
   return parser.parse(payload);
 }
 
 export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
+  config = normalizeConfig(config);
   const sessionStorageKey = createStorageKey(sessionStorageKeyPrefix, config.appId);
   const ephemeralStorageKey = createStorageKey(ephemeralStorageKeyPrefix, config.appId);
 
@@ -146,13 +227,18 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
     const session = await client.auth.getSession();
 
     if (!session) {
-      throw new Error("Celeris user session required");
+      throw new CelerisAuthError("Celeris user session required");
     }
 
     return session;
   }
 
-  async function requestAuthenticatedJson<T>(url: URL, init: RequestInit, parser: { parse: (value: unknown) => T }) {
+  async function requestAuthenticatedJson<T>(
+    url: URL,
+    init: RequestInit,
+    parser: { parse: (value: unknown) => T },
+    context?: "auth" | "sponsorship" | "verification"
+  ) {
     const session = await requireStoredSession();
     return requestJson(
       url,
@@ -163,7 +249,8 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
           ...(init.headers ?? {})
         }
       },
-      parser
+      parser,
+      context
     );
   }
 
@@ -175,7 +262,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
     }
 
     if (!session.zkLogin?.proofInputs || session.zkLogin.maxEpoch === null) {
-      throw new Error("Celeris zkLogin session material is required to submit sponsored transactions");
+      throw new CelerisTransactionVerificationError("Celeris zkLogin session material is required to submit sponsored transactions");
     }
 
     const ephemeralKeypair = Ed25519Keypair.fromSecretKey(readEphemeralSecretKey());
@@ -235,7 +322,8 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
               }
             })
           },
-          authLoginRequestResponseSchema
+          authLoginRequestResponseSchema,
+          "auth"
         );
 
         if (options.redirect !== false) {
@@ -262,7 +350,8 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
               state
             })
           },
-          authSessionResponseSchema
+          authSessionResponseSchema,
+          "auth"
         );
 
         return storeSession(response.session);
@@ -368,7 +457,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
         const catalog = await client.apps.getCatalog();
 
         if (!catalog.registeredProgram) {
-          throw new Error("Celeris app is missing registered Sui program metadata");
+          throw new CelerisSponsorshipError("Celeris app is missing registered Sui program metadata");
         }
 
         const { transactionKind } = buildHelloCelerisSayHelloTransaction({
@@ -386,7 +475,8 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
               transactionKind
             })
           },
-          sayHelloSponsorshipResponseSchema
+          sayHelloSponsorshipResponseSchema,
+          "sponsorship"
         );
 
         try {
@@ -405,7 +495,8 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
                 digest: submitted.digest
               })
             },
-            completeSayHelloResponseSchema
+            completeSayHelloResponseSchema,
+            "verification"
           );
 
           return {
@@ -425,7 +516,8 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
                 outcome: "failed"
               })
             },
-            completeSayHelloResponseSchema
+            completeSayHelloResponseSchema,
+            "verification"
           ).catch(() => null);
           throw error;
         }

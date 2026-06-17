@@ -27,7 +27,7 @@ This document turns the implementation plan into ordered work orders that an age
 | `FS-02.1` | complete | Real Google OAuth And zkLogin Completion | Replace mock hosted auth with real Google OAuth, zkLogin identity derivation, and prover-backed session material | `FS-00`, `FS-01`, `FS-01.1`, `FS-02` |
 | `FS-03` | complete | Credits And Mock Checkout | Catalog, balance, checkout flow, persistent credit ledger | `FS-01`, `FS-01.1`, `FS-02`, `FS-02.1` |
 | `FS-04` | complete | Sponsored Say Hello And Feed | Move package finalization, canonical tx builder, sponsor-sign flow, completion, app-wide feed | `FS-01`, `FS-01.1`, `FS-02`, `FS-02.1`, `FS-03` |
-| `FS-05` | pending | SDK Consumer Hardening And Walkthrough | Public SDK integration proof, walkthrough, regression suite, final polish | `FS-00`, `FS-01`, `FS-01.1`, `FS-02`, `FS-02.1`, `FS-03`, `FS-04` |
+| `FS-05` | complete | SDK Consumer Hardening And Walkthrough | Public SDK integration proof, walkthrough, regression suite, final polish | `FS-00`, `FS-01`, `FS-01.1`, `FS-02`, `FS-02.1`, `FS-03`, `FS-04` |
 
 ## Dependency Map
 
@@ -670,6 +670,12 @@ Turn the reference implementation into a clean developer-integration demo, lock 
 - Playwright end-to-end tests for the main flow
 - API integration tests against Postgres
 - manual smoke test from a clean database and fresh app setup
+
+### Status Note
+
+- `FS-05` is implemented in the repo.
+- The manual operator path is documented in [MVP_WALKTHROUGH.md](./MVP_WALKTHROUGH.md).
+- A developer-owned Next.js consumer example is documented in [../examples/nextjs-sdk-consumer.md](../examples/nextjs-sdk-consumer.md).
 
 ## Global Definition Of Done
 

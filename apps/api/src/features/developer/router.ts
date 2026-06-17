@@ -2,6 +2,7 @@ import type { RequestHandler } from "express";
 import { Router } from "express";
 import { parseApiEnv } from "@celeris/shared";
 import { badRequest, unauthorized } from "../../lib/http-error";
+import { logger } from "../../lib/logger";
 import { DeveloperSetupService, getRuntimeDeveloperSetupService } from "./service";
 
 export interface DeveloperRouterOptions {
@@ -126,6 +127,14 @@ export function createDeveloperRouter(options?: DeveloperRouterOptions) {
 
   router.post("/v1/auth/token", async (req, res) => {
     const session = await resolveService().exchangeToken(req.body);
+    logger.info("audit.auth.token_exchanged", {
+      requestId: res.locals.requestId,
+      clientKind: session.clientKind,
+      clientId: session.clientId,
+      appId: session.appId,
+      userId: session.user.id,
+      walletAddress: session.user.walletAddress
+    });
     res.status(200).json({ session });
   });
 
@@ -179,6 +188,12 @@ export function createDeveloperRouter(options?: DeveloperRouterOptions) {
       developerProfile.id,
       requireRouteParam(req.params.appId, "appId")
     );
+    logger.info("audit.sponsor_wallet.provisioned", {
+      requestId: res.locals.requestId,
+      developerProfileId: developerProfile.id,
+      appId: req.params.appId,
+      sponsorAddress: sponsorWallet.address
+    });
     res.status(201).json({ sponsorWallet });
   });
 
@@ -198,6 +213,14 @@ export function createDeveloperRouter(options?: DeveloperRouterOptions) {
       requireRouteParam(req.params.appId, "appId"),
       req.body
     );
+    logger.info("audit.program.registered", {
+      requestId: res.locals.requestId,
+      developerProfileId: developerProfile.id,
+      appId: req.params.appId,
+      packageId: registeredProgram.packageId,
+      appStateObjectId: registeredProgram.appStateObjectId,
+      authorityCapObjectId: registeredProgram.authorityCapObjectId
+    });
     res.status(200).json({ registeredProgram });
   });
 
@@ -248,6 +271,14 @@ export function createDeveloperRouter(options?: DeveloperRouterOptions) {
       requireRouteParam(req.params.appId, "appId"),
       requireRouteParam(req.params.checkoutSessionId, "checkoutSessionId")
     );
+    logger.info("audit.checkout.completed", {
+      requestId: res.locals.requestId,
+      appId: req.params.appId,
+      checkoutSessionId: req.params.checkoutSessionId,
+      walletAddress: result.checkoutSession.walletAddress,
+      credits: result.checkoutSession.credits,
+      status: result.checkoutSession.status
+    });
     res.status(200).json(result);
   });
 
@@ -257,6 +288,14 @@ export function createDeveloperRouter(options?: DeveloperRouterOptions) {
       requireRouteParam(req.params.appId, "appId"),
       req.body
     );
+    logger.info("audit.say_hello.executed", {
+      requestId: res.locals.requestId,
+      appId: req.params.appId,
+      reservationId: result.sponsorship.reservationId,
+      walletAddress: result.balance.walletAddress,
+      username: result.sponsorship.username,
+      sponsorAddress: result.sponsorship.sponsorAddress
+    });
     res.status(201).json(result);
   });
 
@@ -266,6 +305,14 @@ export function createDeveloperRouter(options?: DeveloperRouterOptions) {
       requireRouteParam(req.params.appId, "appId"),
       req.body
     );
+    logger.info("audit.say_hello.completed", {
+      requestId: res.locals.requestId,
+      appId: req.params.appId,
+      reservationId: result.reservationId,
+      status: result.status,
+      digest: result.transaction?.digest,
+      walletAddress: result.balance.walletAddress
+    });
     res.status(200).json(result);
   });
 

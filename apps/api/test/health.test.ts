@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { createRequest, createResponse } from "node-mocks-http";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app";
 
 const originalEnv = {
@@ -15,7 +15,8 @@ const originalEnv = {
   CELERIS_GOOGLE_ISSUER: process.env.CELERIS_GOOGLE_ISSUER,
   CELERIS_ZKLOGIN_SALT_SEED: process.env.CELERIS_ZKLOGIN_SALT_SEED,
   CELERIS_ZKLOGIN_PROVER_ORIGIN: process.env.CELERIS_ZKLOGIN_PROVER_ORIGIN,
-  CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW: process.env.CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW
+  CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW: process.env.CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW,
+  CELERIS_SUI_RPC_ORIGIN: process.env.CELERIS_SUI_RPC_ORIGIN
 };
 
 function setRequiredApiEnv() {
@@ -31,6 +32,7 @@ function setRequiredApiEnv() {
   process.env.CELERIS_ZKLOGIN_SALT_SEED = "test-zklogin-salt-seed-0123456789";
   process.env.CELERIS_ZKLOGIN_PROVER_ORIGIN = "http://localhost:9000";
   process.env.CELERIS_ZKLOGIN_MAX_EPOCH_WINDOW = "2";
+  process.env.CELERIS_SUI_RPC_ORIGIN = "http://localhost:9001";
 }
 
 function restoreEnv() {
@@ -49,6 +51,7 @@ describe("GET /health", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     restoreEnv();
   });
 
@@ -78,5 +81,52 @@ describe("GET /health", () => {
       status: "ok",
       service: "api"
     });
+  });
+
+  it("returns admin-safe diagnostics for auth, prover, and Sui RPC", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("ok", { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { epoch: "12" } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = createApp();
+    const appHandler = app as unknown as {
+      handle: (request: unknown, response: unknown, next: (error?: unknown) => void) => void;
+    };
+    const request = createRequest({
+      method: "GET",
+      url: "/health/diagnostics"
+    });
+    const response = createResponse({
+      eventEmitter: EventEmitter
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      response.on("end", resolve);
+      appHandler.handle(request, response, reject);
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response._getJSONData()).toMatchObject({
+      status: "ok",
+      service: "api",
+      checks: {
+        googleAuthConfiguration: {
+          status: "ok",
+          issuer: "https://accounts.google.com",
+          redirectUri: "http://localhost:4100/v1/auth/google/callback"
+        },
+        zkLoginProver: {
+          status: "ok",
+          origin: "http://localhost:9000"
+        },
+        suiRpc: {
+          status: "ok",
+          origin: "http://localhost:9001"
+        }
+      }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

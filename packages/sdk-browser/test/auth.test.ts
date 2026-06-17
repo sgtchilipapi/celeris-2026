@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createCelerisBrowserClient } from "../src";
+import {
+  CelerisAuthError,
+  CelerisInsufficientCreditsError,
+  CelerisSponsorshipError,
+  createCelerisBrowserClient
+} from "../src";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -438,5 +443,103 @@ describe("Celeris browser SDK auth", () => {
       username: "Ada",
       transactionKind: expect.any(Object)
     });
+  });
+
+  it("normalizes the public config contract and exposes typed auth failures", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "invalid session" }), {
+        status: 401,
+        headers: {
+          "content-type": "application/json"
+        }
+      })
+    );
+    window.sessionStorage.setItem("celeris.auth.session.app_123", JSON.stringify(createSession()));
+
+    const client = createCelerisBrowserClient({
+      appId: " app_123 ",
+      apiOrigin: "http://localhost:4100/path",
+      hostedAuthOrigin: "http://localhost:3101/sign-in",
+      redirectUri: "http://localhost:3103/auth/callback"
+    });
+
+    expect(client.config).toMatchObject({
+      appId: "app_123",
+      apiOrigin: "http://localhost:4100",
+      hostedAuthOrigin: "http://localhost:3101",
+      redirectUri: "http://localhost:3103/auth/callback"
+    });
+    await expect(client.auth.getSession()).resolves.toBeNull();
+    await expect(client.credits.getBalance()).rejects.toBeInstanceOf(CelerisAuthError);
+  });
+
+  it("classifies sponsorship and credit failures with public SDK errors", async () => {
+    window.sessionStorage.setItem("celeris.auth.session.app_123", JSON.stringify(createSession()));
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ session: createSession() }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            catalog: {
+              appId: "app_123",
+              chainId: "sui:testnet",
+              registeredProgram: {
+                chainFamily: "sui",
+                network: "testnet",
+                packageId: "0x2",
+                appStateObjectId: "0x123",
+                authorityCapObjectId: "0x456",
+                createdAt: "2026-06-30T00:00:00.000Z",
+                updatedAt: "2026-06-30T00:00:00.000Z"
+              },
+              actions: [
+                {
+                  actionType: "say_hello",
+                  priceCredits: 5,
+                  isEnabled: true
+                }
+              ]
+            }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ session: createSession() }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "Insufficient credits" }), {
+          status: 400,
+          headers: {
+            "content-type": "application/json"
+          }
+        })
+      );
+
+    const client = createCelerisBrowserClient({
+      appId: "app_123",
+      apiOrigin: "http://localhost:4100",
+      hostedAuthOrigin: "http://localhost:3101",
+      redirectUri: "http://localhost:3103/auth/callback"
+    });
+
+    await expect(client.actions.sayHello({ username: "Ada" })).rejects.toBeInstanceOf(CelerisInsufficientCreditsError);
+
+    fetchMock.mockReset();
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ session: createSession() }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            catalog: {
+              appId: "app_123",
+              chainId: "sui:testnet",
+              registeredProgram: null,
+              actions: []
+            }
+          }),
+          { status: 200 }
+        )
+      );
+
+    await expect(client.actions.sayHello({ username: "Ada" })).rejects.toBeInstanceOf(CelerisSponsorshipError);
   });
 });
