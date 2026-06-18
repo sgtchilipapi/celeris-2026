@@ -12,3 +12,4 @@ apps/web/.env
 .env
 .env.local
 .zklogin
+sui/hello-celeris/build/

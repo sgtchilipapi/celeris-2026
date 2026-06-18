@@ -400,6 +400,14 @@ describe("developer setup routes", () => {
         isEnabled: true
       }
     });
+    await requestJson(app, {
+      method: "PUT",
+      url: `/v1/developer/apps/${appId}/credits-pricing`,
+      token: developerToken,
+      body: {
+        creditsPerUsd: 500
+      }
+    });
     const consumerToken = await authenticateConsumer(app, appId);
 
     const catalog = await requestJson(app, {
@@ -408,6 +416,7 @@ describe("developer setup routes", () => {
     });
 
     expect(catalog.statusCode).toBe(200);
+    expect(catalog.json.catalog.creditsPricing.creditsPerUsd).toBe(500);
     expect(catalog.json.catalog.actions).toEqual([
       {
         actionType: "say_hello",
@@ -431,14 +440,16 @@ describe("developer setup routes", () => {
       url: `/v1/apps/${appId}/checkout-sessions`,
       token: consumerToken,
       body: {
-        credits: 100
+        usdAmount: 5
       }
     });
 
     expect(checkout.statusCode).toBe(201);
     expect(checkout.json.checkoutSession).toMatchObject({
       appId,
-      credits: 100,
+      usdAmount: 5,
+      creditsPerUsd: 500,
+      credits: 2500,
       status: "pending"
     });
     expect(checkout.json.checkoutSession.checkoutUrl).toContain("/checkout");
@@ -451,7 +462,7 @@ describe("developer setup routes", () => {
 
     expect(complete.statusCode).toBe(200);
     expect(complete.json.checkoutSession.status).toBe("completed");
-    expect(complete.json.balance.availableCredits).toBe(100);
+    expect(complete.json.balance.availableCredits).toBe(2500);
 
     const repeatComplete = await requestJson(app, {
       method: "POST",
@@ -460,7 +471,7 @@ describe("developer setup routes", () => {
     });
 
     expect(repeatComplete.statusCode).toBe(200);
-    expect(repeatComplete.json.balance.availableCredits).toBe(100);
+    expect(repeatComplete.json.balance.availableCredits).toBe(2500);
   });
 
   it("reserves credits, completes sponsored say_hello, captures credits, and lists the feed newest first", async () => {
@@ -504,7 +515,7 @@ describe("developer setup routes", () => {
       url: `/v1/apps/${appId}/checkout-sessions`,
       token: consumerToken,
       body: {
-        credits: 10
+        usdAmount: 1
       }
     });
     await requestJson(app, {
@@ -536,7 +547,7 @@ describe("developer setup routes", () => {
       transactionBytes: "mock-transaction-bytes",
       sponsorSignature: "mock-sponsor-signature"
     });
-    expect(execute.json.balance.availableCredits).toBe(3);
+    expect(execute.json.balance.availableCredits).toBe(93);
 
     const complete = await requestJson(app, {
       method: "POST",
@@ -551,7 +562,7 @@ describe("developer setup routes", () => {
 
     expect(complete.statusCode).toBe(200);
     expect(complete.json.status).toBe("captured");
-    expect(complete.json.balance.availableCredits).toBe(3);
+    expect(complete.json.balance.availableCredits).toBe(93);
     expect(complete.json.transaction).toMatchObject({
       digest: "digest_123",
       username: "Ada",
@@ -857,6 +868,49 @@ describe("developer setup routes", () => {
         proof: "mock-proof"
       }
     });
+  });
+
+  it("returns the developer-created app name for app-scoped hosted auth requests", async () => {
+    const developerToken = await authenticateDashboard(app, "app-name-auth@example.com");
+    const createAppResponse = await requestJson(app, {
+      method: "POST",
+      url: "/v1/developer/apps",
+      token: developerToken,
+      body: {
+        name: "Merchant Portal"
+      }
+    });
+    const appId = createAppResponse.json.app.appId as string;
+
+    const createdLoginRequest = await requestJson(app, {
+      method: "POST",
+      url: "/v1/auth/login-requests",
+      body: {
+        clientKind: "app_consumer",
+        clientId: appId,
+        appId,
+        redirectUri: "http://localhost:3103/auth/callback",
+        zkLogin: {
+          nonce: "consumer-nonce",
+          extendedEphemeralPublicKey: "extended-public-key",
+          maxEpoch: 9,
+          jwtRandomness: "123"
+        }
+      }
+    });
+
+    expect(createdLoginRequest.statusCode).toBe(201);
+    expect(createdLoginRequest.json.loginRequest.clientId).toBe(appId);
+    expect(createdLoginRequest.json.loginRequest.clientName).toBe("Merchant Portal");
+
+    const fetchedLoginRequest = await requestJson(app, {
+      method: "GET",
+      url: `/v1/auth/login-requests/${createdLoginRequest.json.loginRequest.loginRequestId}`
+    });
+
+    expect(fetchedLoginRequest.statusCode).toBe(200);
+    expect(fetchedLoginRequest.json.loginRequest.clientId).toBe(appId);
+    expect(fetchedLoginRequest.json.loginRequest.clientName).toBe("Merchant Portal");
   });
 
   it("rejects invalid app consumer auth audiences", async () => {

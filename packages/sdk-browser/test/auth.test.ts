@@ -45,6 +45,7 @@ describe("Celeris browser SDK auth", () => {
             loginRequestId: "login_123",
             clientKind: "app_consumer",
             clientId: "app_123",
+            clientName: "Test App",
             appId: "app_123",
             redirectUri: "http://localhost:3103/auth/callback",
             state: "state_123",
@@ -92,6 +93,61 @@ describe("Celeris browser SDK auth", () => {
     });
     expect(window.sessionStorage.getItem("celeris.zklogin.ephemeral.app_123")).toContain("extendedEphemeralPublicKey");
     expect(window.localStorage.length).toBe(0);
+  });
+
+  it("resolves the zkLogin max epoch through the current Sui RPC system-state method", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ result: { epoch: "1133" } }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            loginRequest: {
+              loginRequestId: "login_123",
+              clientKind: "app_consumer",
+              clientId: "app_123",
+              clientName: "Test App",
+              appId: "app_123",
+              redirectUri: "http://localhost:3103/auth/callback",
+              state: "state_123",
+              expiresAt: "2026-06-30T00:00:00.000Z",
+              authUrl: "http://localhost:3101/sign-in?loginRequestId=login_123"
+            }
+          }),
+          {
+            status: 201,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        )
+      );
+
+    const client = createCelerisBrowserClient({
+      appId: "app_123",
+      apiOrigin: "http://localhost:4100",
+      hostedAuthOrigin: "http://localhost:3101",
+      redirectUri: "http://localhost:3103/auth/callback",
+      suiRpcOrigin: "https://fullnode.testnet.sui.io:443"
+    });
+
+    await client.auth.startLogin({ redirect: false });
+
+    const rpcBody = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string) as Record<string, unknown>;
+    const loginBody = JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string) as {
+      zkLogin?: { maxEpoch?: number };
+    };
+
+    expect(rpcBody).toMatchObject({
+      method: "suix_getLatestSuiSystemState"
+    });
+    expect(loginBody.zkLogin?.maxEpoch).toBe(1135);
   });
 
   it("exchanges callback parameters and refreshes the stored session", async () => {
@@ -167,6 +223,10 @@ describe("Celeris browser SDK auth", () => {
             catalog: {
               appId: "app_123",
               chainId: "sui:testnet",
+              creditsPricing: {
+                creditsPerUsd: 500,
+                updatedAt: "2026-06-30T00:00:00.000Z"
+              },
               registeredProgram: null,
               actions: [
                 {
@@ -227,7 +287,9 @@ describe("Celeris browser SDK auth", () => {
               appId: "app_123",
               walletAddress: createSession().user.walletAddress,
               chainId: "sui:testnet",
-              credits: 50,
+              usdAmount: 5,
+              creditsPerUsd: 500,
+              credits: 2500,
               status: "pending",
               checkoutUrl: "http://localhost:3103/checkout?appId=app_123&checkoutSessionId=checkout_123",
               successRedirectUrl: "http://localhost:3103/?checkout=success",
@@ -263,7 +325,7 @@ describe("Celeris browser SDK auth", () => {
     await expect(client.credits.getBalance()).resolves.toMatchObject({
       availableCredits: 100
     });
-    await expect(client.credits.startCheckout({ credits: 50, redirect: false })).resolves.toMatchObject({
+    await expect(client.credits.startCheckout({ usdAmount: 5, redirect: false })).resolves.toMatchObject({
       checkoutSessionId: "checkout_123",
       status: "pending"
     });
@@ -297,6 +359,8 @@ describe("Celeris browser SDK auth", () => {
               appId: "app_123",
               walletAddress: createSession().user.walletAddress,
               chainId: "sui:testnet",
+              usdAmount: 1,
+              creditsPerUsd: 50,
               credits: 50,
               status: "completed",
               checkoutUrl: "http://localhost:3103/checkout?appId=app_123&checkoutSessionId=checkout_123",
@@ -348,6 +412,10 @@ describe("Celeris browser SDK auth", () => {
             catalog: {
               appId: "app_123",
               chainId: "sui:testnet",
+              creditsPricing: {
+                creditsPerUsd: 500,
+                updatedAt: "2026-06-30T00:00:00.000Z"
+              },
               registeredProgram: {
                 chainFamily: "sui",
                 network: "testnet",
@@ -483,6 +551,10 @@ describe("Celeris browser SDK auth", () => {
             catalog: {
               appId: "app_123",
               chainId: "sui:testnet",
+              creditsPricing: {
+                creditsPerUsd: 500,
+                updatedAt: "2026-06-30T00:00:00.000Z"
+              },
               registeredProgram: {
                 chainFamily: "sui",
                 network: "testnet",
@@ -532,6 +604,10 @@ describe("Celeris browser SDK auth", () => {
             catalog: {
               appId: "app_123",
               chainId: "sui:testnet",
+              creditsPricing: {
+                creditsPerUsd: 500,
+                updatedAt: "2026-06-30T00:00:00.000Z"
+              },
               registeredProgram: null,
               actions: []
             }

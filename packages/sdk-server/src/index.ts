@@ -1,6 +1,7 @@
 import {
   authLoginRequestResponseSchema,
   authSessionResponseSchema,
+  creditsPricingResponseSchema,
   developerAppListResponseSchema,
   developerAppResponseSchema,
   developerProfileResponseSchema,
@@ -9,6 +10,7 @@ import {
   registerProgramSchema,
   registeredProgramResponseSchema,
   sponsorWalletResponseSchema,
+  type ConfigureCreditsPricingInput,
   type ConfigureSayHelloInput,
   type CreateAuthLoginRequestInput,
   type CreateDeveloperAppInput
@@ -210,6 +212,16 @@ export function createCelerisServerClient(config: CelerisServerClientConfig) {
             body: JSON.stringify(input)
           },
           managedActionResponseSchema
+        ),
+      configureCreditsPricing: async (appId: string, input: ConfigureCreditsPricingInput) =>
+        requestJson(
+          config,
+          `/v1/developer/apps/${appId}/credits-pricing`,
+          {
+            method: "PUT",
+            body: JSON.stringify(input)
+          },
+          creditsPricingResponseSchema
         )
     },
     withToken(token: string) {

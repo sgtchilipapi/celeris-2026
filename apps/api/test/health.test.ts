@@ -128,5 +128,8 @@ describe("GET /health", () => {
       }
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).toMatchObject({
+      method: "suix_getLatestSuiSystemState"
+    });
   });
 });

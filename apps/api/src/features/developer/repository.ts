@@ -71,6 +71,7 @@ export interface AppRecord {
   slug: string;
   allowedChainId: string;
   authProvider: string;
+  creditsPerUsd: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -113,6 +114,8 @@ export interface CheckoutSessionRecord {
   appId: string;
   walletAddress: string;
   chainId: string;
+  usdAmount: number;
+  creditsPerUsd: number;
   credits: number;
   status: string;
   successRedirectUrl: string;
@@ -263,10 +266,17 @@ export interface UpsertManagedActionInput {
   isEnabled: boolean;
 }
 
+export interface UpdateAppCreditsPricingInput {
+  appId: string;
+  creditsPerUsd: number;
+}
+
 export interface CreateCheckoutSessionRecordInput {
   appId: string;
   walletAddress: string;
   chainId: string;
+  usdAmount: number;
+  creditsPerUsd: number;
   credits: number;
   successRedirectUrl: string;
   cancelRedirectUrl: string;
@@ -332,6 +342,7 @@ export interface DeveloperSetupRepository {
   upsertRegisteredProgram(input: UpsertRegisteredProgramInput): Promise<RegisteredProgramRecord>;
   findRegisteredProgramByAppId(appId: string): Promise<RegisteredProgramRecord | null>;
   upsertManagedAction(input: UpsertManagedActionInput): Promise<ManagedActionRecord>;
+  updateAppCreditsPricing(input: UpdateAppCreditsPricingInput): Promise<DeveloperAppAggregateRecord | null>;
   createCheckoutSession(input: CreateCheckoutSessionRecordInput): Promise<CheckoutSessionRecord>;
   findCheckoutSessionById(appId: string, checkoutSessionId: string): Promise<CheckoutSessionRecord | null>;
   completeCheckoutSession(input: CompleteCheckoutSessionRecordInput): Promise<CheckoutSessionRecord | null>;
@@ -357,6 +368,7 @@ function fromPrismaAppAggregate(record: {
   slug: string;
   allowedChainId: string;
   authProvider: string;
+  creditsPerUsd: number;
   createdAt: Date;
   updatedAt: Date;
   sponsorWallets: SponsorWalletRecord[];
@@ -372,6 +384,7 @@ function fromPrismaAppAggregate(record: {
       slug: record.slug,
       allowedChainId: record.allowedChainId,
       authProvider: record.authProvider,
+      creditsPerUsd: record.creditsPerUsd,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt
     },
@@ -681,12 +694,25 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
         }
       });
     },
+    async updateAppCreditsPricing(input) {
+      const record = await prisma.app.update({
+        where: { id: input.appId },
+        data: {
+          creditsPerUsd: input.creditsPerUsd
+        },
+        include: appInclude
+      });
+
+      return fromPrismaAppAggregate(record);
+    },
     async createCheckoutSession(input) {
       return prisma.checkoutSession.create({
         data: {
           appId: input.appId,
           walletAddress: input.walletAddress,
           chainId: input.chainId,
+          usdAmount: input.usdAmount,
+          creditsPerUsd: input.creditsPerUsd,
           credits: input.credits,
           status: "pending",
           successRedirectUrl: input.successRedirectUrl,
@@ -1174,6 +1200,7 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
         slug: input.slug,
         allowedChainId: input.allowedChainId,
         authProvider: input.authProvider,
+        creditsPerUsd: 100,
         createdAt: now,
         updatedAt: now
       };
@@ -1257,6 +1284,22 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
       actionsByAppId.set(input.appId, record);
       return record;
     },
+    async updateAppCreditsPricing(input) {
+      const existing = apps.get(input.appId);
+
+      if (!existing) {
+        return null;
+      }
+
+      const updated: AppRecord = {
+        ...existing,
+        creditsPerUsd: input.creditsPerUsd,
+        updatedAt: new Date()
+      };
+
+      apps.set(input.appId, updated);
+      return getAggregate(updated);
+    },
     async createCheckoutSession(input) {
       const now = new Date();
       const record: CheckoutSessionRecord = {
@@ -1264,6 +1307,8 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
         appId: input.appId,
         walletAddress: input.walletAddress,
         chainId: input.chainId,
+        usdAmount: input.usdAmount,
+        creditsPerUsd: input.creditsPerUsd,
         credits: input.credits,
         status: "pending",
         successRedirectUrl: input.successRedirectUrl,

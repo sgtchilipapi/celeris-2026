@@ -243,6 +243,16 @@ export function createDeveloperRouter(options?: DeveloperRouterOptions) {
     res.status(200).json({ sayHelloAction });
   });
 
+  router.put("/v1/developer/apps/:appId/credits-pricing", developerAuth, async (req, res) => {
+    const developerProfile = res.locals.developerProfile as { id: string };
+    const creditsPricing = await resolveService().configureCreditsPricing(
+      developerProfile.id,
+      requireRouteParam(req.params.appId, "appId"),
+      req.body
+    );
+    res.status(200).json({ creditsPricing });
+  });
+
   router.get("/v1/apps/:appId/catalog", async (req, res) => {
     const catalog = await resolveService().getCatalog(requireRouteParam(req.params.appId, "appId"));
     res.status(200).json({ catalog });

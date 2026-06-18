@@ -16,11 +16,11 @@ The MVP must prove this full story end to end:
 2. The developer creates a new app in Celeris.
 3. Celeris provisions a sponsor wallet for that app.
 4. The developer publishes the in-repo Move package, runs `initialize_app`, and manually registers the resulting Sui IDs into Celeris using a walkthrough.
-5. The developer configures the paid `say_hello` action.
+5. The developer registers a paid user action, using `say_hello` as the reference demo action type.
 6. The developer consumes the Celeris browser SDK in its frontend app and configures it for the new app.
 7. A user signs in through hosted Google auth and gets a stable zkLogin Sui wallet.
 8. The user buys credits.
-9. The user executes `say_hello` through a sponsored transaction flow.
+9. The user executes the registered action through a sponsored transaction flow.
 10. The app-wide transaction feed shows the recorded result with a Sui Explorer link.
 
 ## Scope
@@ -30,7 +30,7 @@ The MVP must prove this full story end to end:
 - One in-repo Move package with two entrypoints: `initialize_app` and `say_hello`.
 - One sponsor wallet per app.
 - One registered Sui package per app.
-- One managed paid action: `say_hello`.
+- Developer-defined managed paid actions, with `say_hello` used as the reference demo action.
 - One developer dashboard surface for app setup and configuration.
 - One developer authorization model layered on top of shared user auth.
 - One canonical developer integration path where the frontend app consumes the Celeris browser SDK.
@@ -63,6 +63,18 @@ The MVP must prove this full story end to end:
   - render the message canonically as `"<username> says Hello Celeris!"`
   - reject writes after 100 entries
 
+## Action Registry And Sponsorship Policy
+
+Managed actions are an app-level credit-metering registry, not a registry of blockchain functions known to Celeris.
+
+- `actionType` is a developer-defined stable key such as `say_hello`, `mint_badge`, or `post_message`.
+- Each action stores credit usage and enabled state for the app.
+- The developer app remains responsible for constructing the transaction kind that should run for a given action.
+- The browser SDK sends the selected `actionType` and transaction kind to Celeris for reservation and sponsorship.
+- Celeris reserves and captures credits based on the registered action, then sponsor-signs only if the request satisfies the app's sponsorship policy.
+- Celeris should not require a new backend route, schema, or Move-function-specific implementation for every action type.
+- Celeris must still reject sponsorship for transactions outside the app's configured chain, app ownership, registered program scope, or other policy bounds.
+
 ## System Responsibilities
 
 - The browser SDK creates zkLogin ephemeral state before hosted auth begins.
@@ -72,9 +84,11 @@ The MVP must prove this full story end to end:
 - The backend resolves or creates the developer authorization record after shared auth for dashboard access.
 - Hosted user auth on the auth origin uses real Google account selection.
 - The backend verifies the Google identity token, resolves a stable user salt, derives the zkLogin Sui address, gets proof inputs, and issues the user session.
-- The browser SDK builds the canonical `say_hello` `TransactionKind`.
-- The backend rebuilds and validates the same canonical transaction before sponsorship.
-- The backend reserves credits, selects sponsor gas, builds transaction bytes, sponsor-signs them, and returns the sponsorship payload.
+- The developer app builds or supplies the `TransactionKind` for the action it wants to execute.
+- The browser SDK passes the developer-selected `actionType` and `TransactionKind` to Celeris.
+- The backend validates that the action is registered, enabled, app-scoped, and has sufficient user credits before sponsorship.
+- The backend enforces sponsorship policy before signing. At minimum, sponsorship must be bounded to the app's configured chain and registered Sui package or program metadata so the sponsor wallet cannot be used for unrelated transactions.
+- The backend reserves credits, selects sponsor gas, builds transaction bytes from the supplied transaction kind, sponsor-signs them, and returns the sponsorship payload.
 - The browser silently adds the zkLogin user signature and submits directly to Sui RPC.
 - The browser reports `submitted` or `failed`.
 - The backend verifies the digest, captures or releases credits, and records the transaction.
@@ -93,7 +107,7 @@ The MVP must prove this full story end to end:
    - `appStateObjectId`
    - `authorityCapObjectId`
 9. Register those Sui IDs against the app through the developer API.
-10. Configure the `say_hello` action cost in credits.
+10. Register the app's user actions and configure each action's credit usage and enabled state.
 11. Consume the Celeris browser SDK in the frontend app and configure it with the app's public runtime values.
 12. Launch the reference demo consumer app on the demo origin.
 
@@ -110,7 +124,7 @@ The Sui registration step must not be auto-orchestrated. The repo must include a
 5. View wallet address, credit balance, and app transaction feed.
 6. Purchase credits through the demo purchase flow.
 7. Enter a username and click `Say Hello Celeris`.
-8. The browser SDK builds the canonical transaction, gets sponsorship, silently signs with zkLogin, and submits to Sui.
+8. The reference app builds the `say_hello` transaction kind, asks the browser SDK to sponsor the registered `say_hello` action, silently signs with zkLogin, and submits to Sui.
 9. The UI refreshes balance and feed state after completion.
 
 ## Required Env Contract
@@ -150,10 +164,12 @@ The repo should fail closed when required auth, session, prover, or RPC env valu
   - `userId`, `walletAddress`, `chainId`, `clientKind`, `clientId`, auth/session metadata, zkLogin session material needed by the browser
 - `CreditLedgerEntry`
   - purchase, reserve, capture, release events
+- `ManagedAction`
+  - `actionId`, `appId`, developer-defined `actionType`, optional display name, `creditUsage`, enabled state, timestamps
 - `PendingActionReservation`
-  - `reservationId`, `appId`, `walletAddress`, `username`, `message`, sponsor gas data, tx bytes, sponsor signature, expiry, status
+  - `reservationId`, `appId`, `actionType`, `walletAddress`, sponsor gas data, tx bytes, sponsor signature, expiry, status, optional action metadata
 - `TransactionRecord`
-  - `transactionId`, `appId`, `actionId`, `walletAddress`, `username`, `message`, `digest`, `explorerUrl`, `status`, timestamps
+  - `transactionId`, `appId`, `actionType`, `walletAddress`, optional action metadata, `digest`, `explorerUrl`, `status`, timestamps
 
 ## API Contract
 
@@ -166,7 +182,8 @@ The repo should fail closed when required auth, session, prover, or RPC env valu
   - `GET /v1/developer/apps/:appId/sponsor-wallet`
   - `PUT /v1/developer/apps/:appId/program`
   - `GET /v1/developer/apps/:appId/program`
-  - route to configure `say_hello` action pricing for the app
+  - `GET /v1/developer/apps/:appId/actions`
+  - `PUT /v1/developer/apps/:appId/actions/:actionType`
 - Auth and user API:
   - hosted login start route
   - Google callback route on the auth origin
@@ -175,12 +192,12 @@ The repo should fail closed when required auth, session, prover, or RPC env valu
   - `GET /v1/apps/:appId/balance`
   - `GET /v1/apps/:appId/transactions`
   - purchase and checkout start and completion routes
-  - `POST /v1/apps/:appId/actions/say_hello/execute`
-  - `POST /v1/apps/:appId/actions/say_hello/complete`
+  - `POST /v1/apps/:appId/actions/:actionType/execute`
+  - `POST /v1/apps/:appId/actions/:actionType/complete`
 
-`execute` input should remain `{ username, transactionKind }`.
+`execute` input should include `{ transactionKind, metadata? }`. The reference `say_hello` demo may include `{ username }` metadata for feed rendering, but sponsorship and credit accounting must key off the registered `actionType`, not a hard-coded Move function.
 
-`execute` output should include `reservationId`, `transactionBytes`, `sponsorSignature`, `sponsorAddress`, `expiresAt`, `username`, and canonical `message`.
+`execute` output should include `reservationId`, `transactionBytes`, `sponsorSignature`, `sponsorAddress`, `expiresAt`, `actionType`, and optional normalized metadata.
 
 `complete` input should include `reservationId`, `outcome`, and `digest` when submitted.
 
@@ -189,12 +206,13 @@ The repo should fail closed when required auth, session, prover, or RPC env valu
 - Be consumable by a developer-owned frontend app through a minimal initialization contract.
 - Support public runtime configuration for at least `appId`, `apiOrigin`, `hostedAuthOrigin`, `redirectUri`, and optional `suiRpcOrigin`.
 - Generate and store zkLogin ephemeral key material in `sessionStorage` only.
-- Build the canonical `say_hello` `TransactionKind`.
-- Request sponsorship from Celeris.
+- Accept a developer-supplied action type and transaction kind for sponsorship.
+- Request sponsorship from Celeris for the registered action type.
 - Add zkLogin user signature silently.
 - Submit directly to `CELERIS_SUI_RPC_ORIGIN`.
 - Report completion back to Celeris.
-- Expose simple user methods for auth, catalog, balance, feed, purchase, and `say_hello`.
+- Expose simple user methods for auth, catalog, balance, feed, purchase, and generic sponsored action execution.
+- The reference app may provide a `say_hello` helper, but that helper must be layered over the generic action sponsorship API.
 
 ## Walkthrough Requirement
 
@@ -207,10 +225,10 @@ The repo must include one clear manual walkthrough covering:
 5. Publishing the Move package.
 6. Running `initialize_app`.
 7. Registering package and object IDs in Celeris.
-8. Configuring action pricing.
+8. Registering action types and configuring action credit usage.
 9. Consuming and configuring the Celeris browser SDK in the frontend app.
 10. Starting the frontend.
-11. Signing in, purchasing credits, and executing `say_hello`.
+11. Signing in, purchasing credits, and executing the registered `say_hello` reference action.
 
 ## Acceptance Criteria
 
@@ -223,9 +241,11 @@ The repo must include one clear manual walkthrough covering:
 - The Move package publishes successfully and `initialize_app` produces the required objects.
 - Manual registration of the Sui package into Celeris succeeds through the documented flow.
 - A developer frontend app can consume the Celeris browser SDK with the documented public runtime config and complete the canonical flow.
+- A developer can register arbitrary app action types for credit metering without Celeris requiring a hard-coded Move function per action.
 - Real Google login produces a stable zkLogin Sui address for repeat logins by the same user.
 - The user can purchase credits and see the balance update.
-- The user can execute paid `say_hello` without a separate signing popup.
+- The user can execute the registered paid `say_hello` reference action without a separate signing popup.
+- Sponsorship is denied for unregistered or disabled actions and for transaction kinds that violate the app's sponsorship policy.
 - The backend verifies the submitted digest and reconciles credits correctly.
 - The transaction feed shows the resulting entry with digest, status, timestamp, wallet, username, message, and Explorer link.
 
@@ -236,7 +256,7 @@ The repo must include one clear manual walkthrough covering:
 3. Realign the `app`, `demo`, and `auth` web surfaces and make the dashboard consume shared Google + zkLogin auth as a first-party client.
 4. Extend the shared auth flow to the reference consumer app and browser SDK.
 5. Implement credits and purchase flow.
-6. Implement sponsored `say_hello` execution, completion, and reconciliation.
+6. Implement generic sponsored action execution, completion, and reconciliation, with `say_hello` as the reference demo action.
 7. Implement the browser SDK flow for silent zkLogin signing and submission.
 8. Implement the reference consumer app that consumes the browser SDK.
 9. Write the manual walkthrough and end-to-end verification steps.

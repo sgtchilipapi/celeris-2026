@@ -3,10 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import {
+  CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
   type ConfigureSayHelloInput,
+  type ConfigureCreditsPricingInput,
+  configureCreditsPricingSchema,
   configureSayHelloSchema,
   type CreateDeveloperAppInput,
   createDeveloperAppSchema,
+  creditsPricingResponseSchema,
   type DeveloperApp,
   developerAppListResponseSchema,
   developerAppResponseSchema,
@@ -16,6 +20,10 @@ import {
   registeredProgramResponseSchema,
   sponsorWalletResponseSchema
 } from "@celeris/shared";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
 
 const developerTokenStorageKey = "celeris.fs011.dashboard.token";
 const developerTokenCookieName = "celeris_dashboard_session";
@@ -34,12 +42,41 @@ interface ProgramFormState {
 }
 
 interface ActionFormState {
+  actionName: string;
   priceCredits: string;
   isEnabled: boolean;
 }
 
+interface CreditsPricingFormState {
+  creditsPerUsd: string;
+}
+
 function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Request failed";
+}
+
+function getProfileInitial(email: string) {
+  return (email.trim()[0] ?? "C").toUpperCase();
+}
+
+function shortenWalletAddress(walletAddress: string) {
+  const normalized = walletAddress.trim();
+
+  if (normalized.length <= 14) {
+    return normalized || "Unavailable";
+  }
+
+  return `${normalized.slice(0, 6)}...${normalized.slice(-6)}`;
+}
+
+function shortenValue(value: string) {
+  const normalized = value.trim();
+
+  if (normalized.length <= 18) {
+    return normalized || "Unavailable";
+  }
+
+  return `${normalized.slice(0, 8)}...${normalized.slice(-6)}`;
 }
 
 function readCookie(name: string) {
@@ -66,19 +103,24 @@ export function DeveloperSetupConsole({
   demoOrigin
 }: DeveloperSetupConsoleProps) {
   const [token, setToken] = useState<string | null>(null);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [developerEmail, setDeveloperEmail] = useState<string>("");
   const [developerWalletAddress, setDeveloperWalletAddress] = useState<string>("");
   const [apps, setApps] = useState<DeveloperApp[]>([]);
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
-  const [newAppName, setNewAppName] = useState("Hello Celeris Demo");
+  const [newAppName, setNewAppName] = useState("");
   const [programForm, setProgramForm] = useState<ProgramFormState>({
     packageId: "",
     appStateObjectId: "",
     authorityCapObjectId: ""
   });
   const [actionForm, setActionForm] = useState<ActionFormState>({
-    priceCredits: "5",
+    actionName: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
+    priceCredits: "",
     isEnabled: true
+  });
+  const [creditsPricingForm, setCreditsPricingForm] = useState<CreditsPricingFormState>({
+    creditsPerUsd: ""
   });
   const [isBusy, setIsBusy] = useState(false);
   const [statusMessage, setStatusMessage] = useState("Developer dashboard ready.");
@@ -119,8 +161,12 @@ export function DeveloperSetupConsole({
       authorityCapObjectId: selectedApp.registeredProgram?.authorityCapObjectId ?? ""
     });
     setActionForm({
+      actionName: selectedApp.sayHelloAction?.actionType ?? CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
       priceCredits: selectedApp.sayHelloAction ? String(selectedApp.sayHelloAction.priceCredits) : "5",
       isEnabled: selectedApp.sayHelloAction?.isEnabled ?? true
+    });
+    setCreditsPricingForm({
+      creditsPerUsd: String(selectedApp.creditsPricing.creditsPerUsd)
     });
   }, [selectedApp]);
 
@@ -237,6 +283,15 @@ export function DeveloperSetupConsole({
     }
   }
 
+  async function copyToClipboard(value: string, label: string) {
+    if (!value) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(value);
+    setStatusMessage(`${label} copied.`);
+  }
+
   async function handleCreateApp(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsBusy(true);
@@ -342,6 +397,10 @@ export function DeveloperSetupConsole({
     setErrorMessage(null);
 
     try {
+      if (actionForm.actionName.trim() !== CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO) {
+        throw new Error("Only say_hello is supported for this MVP app.");
+      }
+
       const payload: ConfigureSayHelloInput = configureSayHelloSchema.parse({
         priceCredits: Number(actionForm.priceCredits),
         isEnabled: actionForm.isEnabled
@@ -355,7 +414,38 @@ export function DeveloperSetupConsole({
         managedActionResponseSchema
       );
       await refreshApp(selectedApp.appId);
-      setStatusMessage("Updated say_hello pricing.");
+      setStatusMessage("Updated say_hello action.");
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function handleConfigureCreditsPricing(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedApp) {
+      return;
+    }
+
+    setIsBusy(true);
+    setErrorMessage(null);
+
+    try {
+      const payload: ConfigureCreditsPricingInput = configureCreditsPricingSchema.parse({
+        creditsPerUsd: Number(creditsPricingForm.creditsPerUsd)
+      });
+      await request(
+        `/v1/developer/apps/${selectedApp.appId}/credits-pricing`,
+        {
+          method: "PUT",
+          body: JSON.stringify(payload)
+        },
+        creditsPricingResponseSchema
+      );
+      await refreshApp(selectedApp.appId);
+      setStatusMessage("Updated credits pricing.");
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     } finally {
@@ -373,202 +463,287 @@ export function DeveloperSetupConsole({
     };
   }
 
+  function updateCreditsPricingField(event: ChangeEvent<HTMLInputElement>) {
+    setCreditsPricingForm({
+      creditsPerUsd: event.target.value
+    });
+  }
+
+  function updateActionField(field: keyof ActionFormState) {
+    return (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.target.type === "checkbox" ? event.target.checked : event.target.value;
+      setActionForm((current) => ({
+        ...current,
+        [field]: value
+      }));
+    };
+  }
+
   return (
-    <main className="workspace">
-      <section className="workspace-header">
-        <div>
-          <p className="workspace-kicker">FS-01.1 Developer Surface Realignment</p>
-          <h1>Developer dashboard</h1>
+    <main className="mx-auto grid max-w-7xl gap-4 px-5 py-5 md:gap-5 md:px-6">
+      <Card className="workspace-header">
+        <div className="workspace-header-copy">
+          <p className="workspace-kicker">CELERIS</p>
+          <h1>Developer Console</h1>
           <p className="workspace-copy">
-            Shared auth is hosted on the auth origin. This dashboard is the reserved first-party client and the demo
-            origin is now kept for the SDK consumer app.
+            This is the place to get your amazing app provide the smoothest user experience.
           </p>
         </div>
-        <dl className="runtime-grid">
-          <div>
-            <dt>Dashboard origin</dt>
-            <dd>{developerAppOrigin}</dd>
-          </div>
-          <div>
-            <dt>Demo origin</dt>
-            <dd>{demoOrigin}</dd>
-          </div>
-          <div>
-            <dt>Auth origin</dt>
-            <dd>{hostedAuthOrigin}</dd>
-          </div>
-          <div>
-            <dt>API origin</dt>
-            <dd>{apiOrigin}</dd>
-          </div>
-        </dl>
-      </section>
-
-      <section className="workspace-band">
-        <div className="band-header">
-          <div>
-            <h2>Developer session</h2>
-            <p>{developerEmail ? `Signed in as ${developerEmail}` : "Waiting for dashboard session."}</p>
-          </div>
-          <button className="button secondary" onClick={handleSignOut} type="button" disabled={isBusy || !token}>
-            Sign out
-          </button>
-        </div>
-
-        <dl className="runtime-grid">
-          <div>
-            <dt>Email</dt>
-            <dd>{developerEmail || "Unavailable"}</dd>
-          </div>
-          <div>
-            <dt>Wallet</dt>
-            <dd>{developerWalletAddress || "Unavailable"}</dd>
-          </div>
-        </dl>
-      </section>
-
-      <section className="workspace-grid">
-        <section className="workspace-band">
-          <div className="band-header">
-            <div>
-              <h2>Apps</h2>
-              <p>Create and select the app you want to configure.</p>
+        <div className="profile-menu">
+          <Button
+            aria-expanded={isProfileMenuOpen}
+            aria-haspopup="menu"
+            aria-label="Developer profile"
+            className="profile-avatar-button"
+            onClick={() => setIsProfileMenuOpen((current) => !current)}
+            type="button"
+            variant="ghost"
+          >
+            {getProfileInitial(developerEmail)}
+          </Button>
+          {isProfileMenuOpen ? (
+            <div className="profile-menu-panel" role="menu">
+              <div className="profile-menu-identity">
+                <div className="profile-menu-avatar" aria-hidden="true">
+                  {getProfileInitial(developerEmail)}
+                </div>
+                <div>
+                  <p>{developerEmail || "Unavailable"}</p>
+                  <span title={developerWalletAddress || "Unavailable"}>{shortenWalletAddress(developerWalletAddress)}</span>
+                </div>
+              </div>
+              <Button className="profile-menu-item" onClick={handleSignOut} role="menuitem" type="button" disabled={isBusy || !token} variant="ghost">
+                Sign out
+              </Button>
             </div>
-          </div>
-
-          <form className="form-grid compact" onSubmit={handleCreateApp}>
-            <label>
-              <span>App name</span>
-              <input name="name" onChange={(event) => setNewAppName(event.target.value)} type="text" value={newAppName} />
-            </label>
-            <button className="button" disabled={isBusy || !token} type="submit">
-              Create app
-            </button>
-          </form>
-
-          <div className="list-stack" role="list" aria-label="Developer apps">
-            {apps.length === 0 ? <p className="empty-state">No apps yet.</p> : null}
-            {apps.map((app) => (
-              <button
-                aria-pressed={selectedAppId === app.appId}
-                className={`list-row${selectedAppId === app.appId ? " selected" : ""}`}
-                key={app.appId}
-                onClick={() => setSelectedAppId(app.appId)}
-                type="button"
-              >
-                <span>{app.name}</span>
-                <small>{app.appId}</small>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="workspace-band">
-          <div className="band-header">
-            <div>
-              <h2>App configuration</h2>
-              <p>{selectedApp ? selectedApp.name : "Choose an app to continue."}</p>
-            </div>
-            <button
-              className="button secondary"
-              disabled={!selectedApp || isBusy}
-              onClick={handleProvisionSponsorWallet}
-              type="button"
-            >
-              Provision sponsor wallet
-            </button>
-          </div>
-
-          {selectedApp ? (
-            <>
-              <dl className="runtime-grid">
-                <div>
-                  <dt>App ID</dt>
-                  <dd>{selectedApp.appId}</dd>
-                </div>
-                <div>
-                  <dt>Allowed chain</dt>
-                  <dd>{selectedApp.allowedChainId}</dd>
-                </div>
-                <div>
-                  <dt>Auth provider</dt>
-                  <dd>{selectedApp.authProvider}</dd>
-                </div>
-                <div>
-                  <dt>Sponsor wallet</dt>
-                  <dd>{selectedApp.sponsorWallet?.address ?? "Not provisioned yet"}</dd>
-                </div>
-              </dl>
-
-              <form className="form-grid" onSubmit={handleRegisterProgram}>
-                <h3>Program registration</h3>
-                <label>
-                  <span>Package ID</span>
-                  <input onChange={updateProgramField("packageId")} type="text" value={programForm.packageId} />
-                </label>
-                <label>
-                  <span>AppState object ID</span>
-                  <input
-                    onChange={updateProgramField("appStateObjectId")}
-                    type="text"
-                    value={programForm.appStateObjectId}
-                  />
-                </label>
-                <label>
-                  <span>Authority capability object ID</span>
-                  <input
-                    onChange={updateProgramField("authorityCapObjectId")}
-                    type="text"
-                    value={programForm.authorityCapObjectId}
-                  />
-                </label>
-                <button className="button" disabled={isBusy} type="submit">
-                  Save program IDs
-                </button>
-              </form>
-
-              <form className="form-grid compact" onSubmit={handleConfigureAction}>
-                <h3>say_hello pricing</h3>
-                <label>
-                  <span>Price in credits</span>
-                  <input
-                    min={0}
-                    onChange={(event) => setActionForm((current) => ({ ...current, priceCredits: event.target.value }))}
-                    type="number"
-                    value={actionForm.priceCredits}
-                  />
-                </label>
-                <label className="checkbox-row">
-                  <input
-                    checked={actionForm.isEnabled}
-                    onChange={(event) => setActionForm((current) => ({ ...current, isEnabled: event.target.checked }))}
-                    type="checkbox"
-                  />
-                  <span>Enabled</span>
-                </label>
-                <button className="button" disabled={isBusy} type="submit">
-                  Save action
-                </button>
-              </form>
-
-              <section className="snippet-block" aria-label="SDK config">
-                <h3>SDK config</h3>
-                <pre>{JSON.stringify(selectedApp.sdkConfig, null, 2)}</pre>
-              </section>
-            </>
-          ) : (
-            <p className="empty-state">Create or select an app to configure the slice.</p>
-          )}
-        </section>
-      </section>
-
-      <section className="workspace-band status-band">
-        <div>
-          <h2>Status</h2>
-          <p>{statusMessage}</p>
+          ) : null}
         </div>
-        {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
+      </Card>
+
+      <section className="grid gap-5 lg:grid-cols-[20rem_minmax(0,1fr)]">
+        <Card>
+          <CardHeader>
+            <div>
+              <CardTitle>Apps</CardTitle>
+              <CardDescription>Create and select an app.</CardDescription>
+            </div>
+          </CardHeader>
+
+          <CardContent>
+            <form className="grid gap-3" onSubmit={handleCreateApp}>
+              <Label>
+                <span>App name</span>
+                <Input name="name" onChange={(event) => setNewAppName(event.target.value)} type="text" value={newAppName} />
+              </Label>
+              <Button disabled={isBusy || !token} type="submit">
+                Create app
+              </Button>
+            </form>
+
+            <div className="grid gap-2 pt-1" role="list" aria-label="Developer apps">
+              {apps.length === 0 ? <p className="empty-state">No apps yet.</p> : null}
+              {apps.map((app) => (
+                <button
+                  aria-pressed={selectedAppId === app.appId}
+                  className={`list-row${selectedAppId === app.appId ? " selected" : ""} rounded-md`}
+                  key={app.appId}
+                  onClick={() => setSelectedAppId(app.appId)}
+                  type="button"
+                >
+                  <span>{app.name}</span>
+                  <small>{app.appId}</small>
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="items-start max-md:flex-col">
+            <div className="min-w-0">
+              <CardTitle>
+                App configuration{selectedApp ? <> for <span className="italic">{selectedApp.name}</span></> : null}
+              </CardTitle>
+              <CardDescription>{selectedApp ? "Runtime settings and Sui package registration." : "Choose an app to continue."}</CardDescription>
+            </div>
+          </CardHeader>
+
+          <CardContent>
+            {selectedApp ? (
+              <>
+                <dl className="grid gap-3 rounded-md border border-[rgba(23,34,31,0.12)] bg-white/55 p-4 md:grid-cols-2">
+                  <div className="grid gap-1">
+                    <dt>App ID:</dt>
+                    <dd className="flex min-w-0 items-center gap-2">
+                      <span className="truncate" title={selectedApp.appId}>{shortenValue(selectedApp.appId)}</span>
+                      <Button className="h-7 min-h-7 shrink-0 px-2 text-xs" onClick={() => void copyToClipboard(selectedApp.appId, "App ID")} type="button" variant="secondary">
+                        Copy
+                      </Button>
+                    </dd>
+                  </div>
+                  <div className="grid gap-1">
+                    <dt>Network:</dt>
+                    <dd>{selectedApp.allowedChainId}</dd>
+                  </div>
+                  <div className="grid gap-1">
+                    <dt>Auth provider:</dt>
+                    <dd>{selectedApp.authProvider}</dd>
+                  </div>
+                  <div className="grid gap-1">
+                    <dt>Sponsor wallet:</dt>
+                    <dd className="flex min-w-0 items-center gap-2">
+                      <span className="truncate" title={selectedApp.sponsorWallet?.address ?? "Not provisioned yet"}>
+                        {selectedApp.sponsorWallet?.address ? shortenWalletAddress(selectedApp.sponsorWallet.address) : <Button
+                          className="shrink-0"
+                          variant="secondary"
+                          disabled={!selectedApp || isBusy}
+                          onClick={handleProvisionSponsorWallet}
+                          type="button"
+                        >
+                          Generate
+                        </Button>}
+                      </span>
+                      {selectedApp.sponsorWallet?.address ? (
+                        <Button className="h-7 min-h-7 shrink-0 px-2 text-xs" onClick={() => void copyToClipboard(selectedApp.sponsorWallet?.address ?? "", "Sponsor wallet")} type="button" variant="secondary">
+                          Copy
+                        </Button>
+                      ) : null}
+                    </dd>
+                  </div>
+                </dl>
+
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_18rem]">
+                  <form className="grid gap-3" onSubmit={handleRegisterProgram}>
+                    <div>
+                      <h3 className="text-base font-semibold">Deployed Sui package</h3>
+                      <p className="mt-1 text-sm text-[#55635d]">Register the package and object IDs.</p>
+                    </div>
+                    <Label>
+                      <span>Package ID</span>
+                      <Input onChange={updateProgramField("packageId")} type="text" value={programForm.packageId} />
+                    </Label>
+                    <Label>
+                      <span>AppState object ID</span>
+                      <Input
+                        onChange={updateProgramField("appStateObjectId")}
+                        type="text"
+                        value={programForm.appStateObjectId}
+                      />
+                    </Label>
+                    <Label>
+                      <span>Authority capability object ID</span>
+                      <Input
+                        onChange={updateProgramField("authorityCapObjectId")}
+                        type="text"
+                        value={programForm.authorityCapObjectId}
+                      />
+                    </Label>
+                    <Button className="justify-self-start" disabled={isBusy} type="submit">
+                      Save program IDs
+                    </Button>
+                  </form>
+
+                  <form id="credits-pricing-form" className="grid content-start gap-3 rounded-md border border-[rgba(23,34,31,0.12)] bg-white/55 p-4" onSubmit={handleConfigureCreditsPricing}>
+                    <div>
+                      <h3 className="text-base font-semibold">Credits Pricing</h3>
+                    </div>
+                    <Label>
+                      <span>Credits per 1$</span>
+                      <Input
+                        min={1}
+                        onChange={updateCreditsPricingField}
+                        step={1}
+                        type="number"
+                        value={creditsPricingForm.creditsPerUsd}
+                      />
+                    </Label>
+                    <Button disabled={isBusy} type="submit">
+                      Save pricing
+                    </Button>
+                  </form>
+                </div>
+              </>
+            ) : (
+              <p className="empty-state">Create or select an app to configure the slice.</p>
+            )}
+
+          </CardContent>
+        </Card>
       </section>
+      <section className="grid gap-5 lg:grid-cols-[20rem_minmax(0,1fr)]">
+        <Card className="flex items-start justify-between gap-4 p-4 max-md:flex-col">
+          <div>
+            <h2 className="text-sm font-semibold">Status</h2>
+            <p className="mt-1 text-sm text-[#55635d]">{statusMessage}</p>
+          </div>
+          {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
+        </Card>
+        <Card>
+          <CardHeader className="items-start max-md:flex-col">
+            <div className="min-w-0">
+              <CardTitle>
+                Allowed user actions
+              </CardTitle>
+              <CardDescription>Add/Configure metered user actions here.</CardDescription>
+            </div>
+          </CardHeader>
+
+          <CardContent id="user-actions-configuration">
+            {selectedApp ? (
+              <>
+                <div className="grid gap-5">
+                  <form className="grid gap-3 xl:grid-cols-[minmax(10rem,1fr)_10rem_8rem_auto]" onSubmit={handleConfigureAction}>
+                    <Label>
+                      <span>Action name</span>
+                      <Input onChange={updateActionField("actionName")} type="text" value={actionForm.actionName} />
+                    </Label>
+                    <Label>
+                      <span>Credit usage</span>
+                      <Input
+                        min={0}
+                        onChange={updateActionField("priceCredits")}
+                        step={1}
+                        type="number"
+                        value={actionForm.priceCredits}
+                      />
+                    </Label>
+                    <Label className="self-end rounded-md border border-[rgba(23,34,31,0.12)] bg-white/55 px-3 py-2">
+                      <span>Enabled</span>
+                      <input
+                        checked={actionForm.isEnabled}
+                        className="h-4 w-4"
+                        onChange={updateActionField("isEnabled")}
+                        type="checkbox"
+                      />
+                    </Label>
+                    <Button className="self-end" disabled={isBusy} type="submit">
+                      Create Action
+                    </Button>
+                  </form>
+                </div>
+                <div className="grid gap-3">
+                  <h3 className="text-base font-semibold">Configured actions</h3>
+                  {selectedApp.sayHelloAction ? (
+                    <div className="list-row rounded-md" role="listitem">
+                      <div>
+                        <span>{selectedApp.sayHelloAction.actionType}</span>
+                        <small>{selectedApp.sayHelloAction.priceCredits} credits per use</small>
+                      </div>
+                      <small>{selectedApp.sayHelloAction.isEnabled ? "Enabled" : "Disabled"}</small>
+                    </div>
+                  ) : (
+                    <p className="empty-state">No user actions configured yet.</p>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p className="empty-state">Create or select an app to configure the slice.</p>
+            )}
+
+          </CardContent>
+        </Card>
+      </section>
+
     </main>
   );
 }

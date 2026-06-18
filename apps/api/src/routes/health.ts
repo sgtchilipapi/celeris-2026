@@ -57,7 +57,7 @@ healthRouter.get("/health/diagnostics", async (_req, res) => {
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
-        method: "sui_getLatestSuiSystemState",
+        method: "suix_getLatestSuiSystemState",
         params: []
       })
     })

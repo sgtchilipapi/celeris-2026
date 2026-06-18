@@ -17,6 +17,8 @@ import {
   chainIdSchema,
   type ConfigureSayHelloInput,
   configureSayHelloSchema,
+  type ConfigureCreditsPricingInput,
+  configureCreditsPricingSchema,
   type CreateAuthLoginRequestInput,
   createAuthLoginRequestSchema,
   type CreateCheckoutSessionInput,
@@ -190,6 +192,13 @@ function toManagedAction(record: ManagedActionRecord) {
   };
 }
 
+function toCreditsPricing(record: DeveloperAppAggregateRecord["app"]) {
+  return {
+    creditsPerUsd: record.creditsPerUsd,
+    updatedAt: toIsoString(record.updatedAt)
+  };
+}
+
 function toCatalogAction(record: ManagedActionRecord) {
   return {
     actionType: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
@@ -213,6 +222,7 @@ function toDeveloperApp(
     sponsorWallet: aggregate.sponsorWallet ? toSponsorWallet(aggregate.sponsorWallet) : null,
     registeredProgram: aggregate.registeredProgram ? toRegisteredProgram(aggregate.registeredProgram) : null,
     sayHelloAction: aggregate.sayHelloAction ? toManagedAction(aggregate.sayHelloAction) : null,
+    creditsPricing: toCreditsPricing(aggregate.app),
     sdkConfig: {
       appId: aggregate.app.id,
       allowedChainId: chainIdSchema.parse(aggregate.app.allowedChainId),
@@ -559,6 +569,7 @@ export class DeveloperSetupService {
   async createLoginRequest(input: CreateAuthLoginRequestInput) {
     const payload = createAuthLoginRequestSchema.parse(input);
     const redirectOrigin = parseOrigin(payload.redirectUri);
+    let clientName = "Celeris Developer Dashboard";
 
     if (payload.clientKind === CELERIS_AUTH_CLIENT_KIND_DEVELOPER_DASHBOARD) {
       if (payload.clientId !== CELERIS_AUTH_CLIENT_ID_DEVELOPER_DASHBOARD) {
@@ -587,6 +598,8 @@ export class DeveloperSetupService {
         throw badRequest("Unknown app auth audience");
       }
 
+      clientName = app.app.name;
+
       if (redirectOrigin !== parseOrigin(this.demoFrontendOrigin)) {
         throw badRequest("App consumer redirect URI must target the demo origin");
       }
@@ -612,6 +625,7 @@ export class DeveloperSetupService {
       loginRequestId: record.id,
       clientKind: payload.clientKind,
       clientId: payload.clientId,
+      clientName,
       appId: record.appId,
       redirectUri: payload.redirectUri,
       state: record.state,
@@ -624,11 +638,13 @@ export class DeveloperSetupService {
 
   async getLoginRequest(loginRequestId: string) {
     const request = await this.requireActiveLoginRequest(loginRequestId);
+    const clientName = await this.resolveAuthClientName(request.clientKind, request.appId);
 
     return {
       loginRequestId: request.id,
       clientKind: request.clientKind,
       clientId: request.clientId,
+      clientName,
       appId: request.appId,
       redirectUri: request.redirectUri,
       state: request.state,
@@ -637,6 +653,19 @@ export class DeveloperSetupService {
       expiresAt: request.expiresAt.toISOString(),
       authUrl: new URL(`/sign-in?loginRequestId=${request.id}`, this.hostedAuthOrigin).toString()
     };
+  }
+
+  private async resolveAuthClientName(clientKind: string, appId: string | null) {
+    if (clientKind === CELERIS_AUTH_CLIENT_KIND_DEVELOPER_DASHBOARD) {
+      return "Celeris Developer Dashboard";
+    }
+
+    if (clientKind === CELERIS_AUTH_CLIENT_KIND_APP_CONSUMER && appId) {
+      const app = await this.repository.findAppById(appId);
+      return app?.app.name ?? appId;
+    }
+
+    return "Celeris";
   }
 
   async completeLoginRequest(loginRequestId: string, input: unknown) {
@@ -968,12 +997,28 @@ export class DeveloperSetupService {
     return toManagedAction(action);
   }
 
+  async configureCreditsPricing(developerProfileId: string, appId: string, input: ConfigureCreditsPricingInput) {
+    await this.requireApp(developerProfileId, appId);
+    const payload = configureCreditsPricingSchema.parse(input);
+    const app = await this.repository.updateAppCreditsPricing({
+      appId,
+      creditsPerUsd: payload.creditsPerUsd
+    });
+
+    if (!app) {
+      throw notFound("App not found");
+    }
+
+    return toCreditsPricing(app.app);
+  }
+
   async getCatalog(appId: string) {
     const app = await this.requirePublicApp(appId);
 
     return {
       appId: app.app.id,
       chainId: chainIdSchema.parse(app.app.allowedChainId),
+      creditsPricing: toCreditsPricing(app.app),
       actions: app.sayHelloAction ? [toCatalogAction(app.sayHelloAction)] : [],
       registeredProgram: app.registeredProgram ? toRegisteredProgram(app.registeredProgram) : null
     };
@@ -994,8 +1039,9 @@ export class DeveloperSetupService {
 
   async createCheckoutSession(session: AppConsumerSession, appId: string, input: CreateCheckoutSessionInput) {
     const appConsumer = this.requireAppConsumerSession(session, appId);
-    await this.requirePublicApp(appId);
+    const app = await this.requirePublicApp(appId);
     const payload = createCheckoutSessionSchema.parse(input);
+    const credits = payload.usdAmount * app.app.creditsPerUsd;
     const defaultSuccessUrl = new URL("/", this.demoFrontendOrigin);
     defaultSuccessUrl.searchParams.set("checkout", "success");
     const defaultCancelUrl = new URL("/", this.demoFrontendOrigin);
@@ -1004,7 +1050,9 @@ export class DeveloperSetupService {
       appId,
       walletAddress: appConsumer.walletAddress,
       chainId: appConsumer.chainId,
-      credits: payload.credits,
+      usdAmount: payload.usdAmount,
+      creditsPerUsd: app.app.creditsPerUsd,
+      credits,
       successRedirectUrl: payload.successRedirectUrl ?? defaultSuccessUrl.toString(),
       cancelRedirectUrl: payload.cancelRedirectUrl ?? defaultCancelUrl.toString()
     });
@@ -1302,6 +1350,8 @@ export class DeveloperSetupService {
       appId: record.appId,
       walletAddress: record.walletAddress,
       chainId: chainIdSchema.parse(record.chainId),
+      usdAmount: record.usdAmount,
+      creditsPerUsd: record.creditsPerUsd,
       credits: record.credits,
       status: record.status,
       checkoutUrl: checkoutUrl.toString(),

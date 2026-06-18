@@ -107,6 +107,7 @@ model App {
   slug             String             @unique
   allowedChainId   String
   authProvider     String
+  creditsPerUsd    Int                @default(100)
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
   developer        DeveloperAccount?  @relation(fields: [developerId], references: [id], onDelete: Cascade)
@@ -174,6 +175,8 @@ model CheckoutSession {
   appId              String
   walletAddress      String
   chainId            String
+  usdAmount          Int
+  creditsPerUsd      Int
   credits            Int
   status             String
   successRedirectUrl String

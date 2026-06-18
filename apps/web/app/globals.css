@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 :root {
   color-scheme: light;
   --bg: #f4f0e8;
@@ -118,15 +120,22 @@ a {
 
 .workspace-header,
 .workspace-band {
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  padding: 1.25rem;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
 }
 
 .workspace-header {
-  display: grid;
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   gap: 1rem;
+}
+
+.workspace-header-copy {
+  min-width: 0;
 }
 
 .workspace-kicker {
@@ -189,6 +198,116 @@ a {
   overflow-wrap: anywhere;
 }
 
+.profile-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.profile-avatar-button {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  border: 1px solid rgba(23, 34, 31, 0.18);
+  background: #17221f;
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(23, 34, 31, 0.16);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.profile-avatar-button:hover,
+.profile-avatar-button:focus-visible {
+  outline: 2px solid rgba(204, 109, 44, 0.45);
+  outline-offset: 3px;
+}
+
+.profile-menu-panel {
+  position: absolute;
+  top: calc(100% + 0.65rem);
+  right: 0;
+  z-index: 10;
+  width: min(19rem, calc(100vw - 2.5rem));
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: #fff;
+  box-shadow: 0 18px 44px rgba(23, 34, 31, 0.18);
+}
+
+.profile-menu-identity {
+  display: grid;
+  grid-template-columns: 2.35rem minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.profile-menu-avatar {
+  display: grid;
+  place-items: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 50%;
+  background: #17221f;
+  color: #fff;
+  font-weight: 700;
+}
+
+.profile-menu-identity p,
+.profile-menu-identity span {
+  display: block;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-menu-identity p {
+  font-weight: 650;
+}
+
+.profile-menu-identity span {
+  margin-top: 0.18rem;
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.profile-menu-item {
+  width: 100%;
+  min-height: 2.4rem;
+  margin-top: 0.65rem;
+  border: 0;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.profile-menu-item:hover,
+.profile-menu-item:focus-visible {
+  background: rgba(23, 34, 31, 0.06);
+  outline: none;
+}
+
+@media (max-width: 720px) {
+  .workspace-header {
+    align-items: flex-start;
+  }
+
+  .profile-menu {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+  }
+}
+
 .segmented-control {
   display: inline-grid;
   grid-auto-flow: column;
@@ -240,19 +359,6 @@ a {
 
 .form-grid span {
   font-size: 0.9rem;
-}
-
-.form-grid input[type="email"],
-.form-grid input[type="number"],
-.form-grid input[type="password"],
-.form-grid input[type="text"] {
-  min-height: 2.75rem;
-  border-radius: 0.45rem;
-  border: 1px solid var(--border);
-  padding: 0.65rem 0.8rem;
-  font: inherit;
-  background: #fff;
-  color: var(--ink);
 }
 
 .button {

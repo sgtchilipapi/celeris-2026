@@ -35,7 +35,7 @@ export interface StartLoginOptions {
 }
 
 export interface StartCheckoutOptions {
-  credits: number;
+  usdAmount: number;
   redirect?: boolean;
   successRedirectUrl?: string;
   cancelRedirectUrl?: string;
@@ -135,7 +135,7 @@ async function resolveMaxEpoch(suiRpcOrigin?: string) {
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: 1,
-      method: "sui_getLatestSuiSystemState",
+      method: "suix_getLatestSuiSystemState",
       params: []
     })
   });
@@ -421,7 +421,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
           {
             method: "POST",
             body: JSON.stringify({
-              credits: options.credits,
+              usdAmount: options.usdAmount,
               successRedirectUrl: options.successRedirectUrl,
               cancelRedirectUrl: options.cancelRedirectUrl
             })

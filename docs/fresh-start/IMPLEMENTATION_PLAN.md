@@ -16,11 +16,11 @@ Build the MVP as one clean, demoable Sui path:
 2. The developer provisions a sponsor wallet.
 3. The developer manually publishes and initializes the Move package.
 4. The developer manually registers the Sui IDs into Celeris through the documented walkthrough.
-5. The developer configures the paid `say_hello` action.
+5. The developer registers paid user actions, with `say_hello` as the reference demo action.
 6. A frontend app consumes the Celeris browser SDK.
 7. A user signs in with real Google + zkLogin.
 8. The user buys credits.
-9. The user executes sponsored `say_hello`.
+9. The user executes a sponsored registered action.
 10. The app-wide transaction feed shows the result.
 
 ## Planning Rules
@@ -140,7 +140,7 @@ These additions do not change product scope. They exist so the runtime can persi
 - `App`
   - `id`, `developerProfileId`, `name`, `slug`, `allowedChainId`, `authProvider`, timestamps
 - `ManagedAction`
-  - `id`, `appId`, `actionType`, `priceCredits`, `isEnabled`, timestamps
+  - `id`, `appId`, developer-defined `actionType`, optional `displayName`, `creditUsage`, `isEnabled`, timestamps
 - `SponsorWallet`
   - `id`, `appId`, `chainFamily`, `network`, `address`, `encryptedSecret`, timestamps
 - `RegisteredProgram`
@@ -171,11 +171,11 @@ Reserved first-party auth client:
 ### Sponsored action flow
 
 - `PendingActionReservation`
-  - `id`, `appId`, `walletAddress`, `chainId`, `actionType`, `status`, `username`, `message`, `creditsReserved`, `transactionBytes`, `sponsorSignature`, `sponsorAddress`, `expiresAt`, `submittedDigest`, timestamps
+  - `id`, `appId`, `walletAddress`, `chainId`, `actionType`, `status`, optional `metadataJson`, `creditsReserved`, `transactionBytes`, `sponsorSignature`, `sponsorAddress`, `expiresAt`, `submittedDigest`, timestamps
 - `SponsorGasCoinLock`
   - `id`, `appId`, `reservationId`, `objectId`, `version`, `digest`, `status`, `expiresAt`, timestamps
 - `TransactionRecord`
-  - `id`, `appId`, `walletAddress`, `chainId`, `actionType`, `username`, `message`, `digest`, `explorerUrl`, `status`, `confirmedAt`, timestamps
+  - `id`, `appId`, `walletAddress`, `chainId`, `actionType`, optional `metadataJson`, `digest`, `explorerUrl`, `status`, `confirmedAt`, timestamps
 
 ## Public API Plan
 
@@ -190,7 +190,8 @@ Reserved first-party auth client:
 - `GET /v1/developer/apps/:appId/sponsor-wallet`
 - `PUT /v1/developer/apps/:appId/program`
 - `GET /v1/developer/apps/:appId/program`
-- `PUT /v1/developer/apps/:appId/actions/say_hello`
+- `GET /v1/developer/apps/:appId/actions`
+- `PUT /v1/developer/apps/:appId/actions/:actionType`
 
 ### User auth API
 
@@ -208,8 +209,8 @@ Reserved first-party auth client:
 - `GET /v1/apps/:appId/transactions`
 - `POST /v1/apps/:appId/checkout-sessions`
 - `POST /v1/apps/:appId/checkout-sessions/:checkoutSessionId/complete`
-- `POST /v1/apps/:appId/actions/say_hello/execute`
-- `POST /v1/apps/:appId/actions/say_hello/complete`
+- `POST /v1/apps/:appId/actions/:actionType/execute`
+- `POST /v1/apps/:appId/actions/:actionType/complete`
 
 ## SDK Plan
 
@@ -227,7 +228,8 @@ Target API shape:
 - `client.apps.getCatalog()`
 - `client.credits.getBalance()`
 - `client.credits.startCheckout()`
-- `client.actions.sayHello({ username })`
+- `client.actions.execute({ actionType, transactionKind, metadata? })`
+- optional reference helper: `client.actions.sayHello({ username })`
 - `client.transactions.list()`
 
 The SDK must own:
@@ -236,7 +238,7 @@ The SDK must own:
 - zkLogin ephemeral state generation
 - auth-code exchange
 - user bearer token storage in session-scoped storage
-- canonical `say_hello` transaction building
+- accepting developer-built transaction kinds for registered actions
 - sponsored transaction submission
 - completion reporting
 
@@ -253,7 +255,8 @@ Target API shape:
 - `apps.get()`
 - `apps.provisionSponsorWallet()`
 - `apps.registerProgram()`
-- `apps.configureSayHello()`
+- `apps.configureAction()`
+- optional reference helper: `apps.configureSayHello()`
 
 ## Vertical Slice Plan
 
@@ -301,7 +304,7 @@ Stand up the repo structure and shared runtime skeleton so later slices do not f
 
 ### Goal
 
-A developer can create a new app, provision its sponsor wallet, register the Sui program metadata, configure `say_hello`, and point a Next.js frontend app at that app's public config.
+A developer can create a new app, provision its sponsor wallet, register Sui program metadata, configure metered user actions, and point a Next.js frontend app at that app's public config.
 
 ### Database work
 
@@ -316,7 +319,7 @@ A developer can create a new app, provision its sponsor wallet, register the Sui
 - Implement app creation and fetch routes.
 - Implement sponsor-wallet provisioning and read routes.
 - Implement program registration and read routes.
-- Implement `say_hello` action configuration route.
+- Implement generic action configuration routes.
 - Add Sui ID validation helpers in `packages/shared`.
 
 ### Next.js work
@@ -326,7 +329,7 @@ A developer can create a new app, provision its sponsor wallet, register the Sui
   - create an app
   - provision a sponsor wallet
   - enter `packageId`, `appStateObjectId`, and `authorityCapObjectId`
-  - configure the `say_hello` price
+  - configure action credit usage and enabled state
 - Add a simple frontend app config module that uses:
   - `appId`
   - `apiOrigin`
@@ -344,7 +347,7 @@ A developer can create a new app, provision its sponsor wallet, register the Sui
 - app creation
 - sponsor-wallet provisioning is idempotent
 - malformed Sui IDs are rejected
-- `say_hello` action config is persisted correctly
+- action config is persisted correctly
 
 ### Exit criteria
 
@@ -529,7 +532,12 @@ A signed-in user can buy credits through a hosted mock checkout flow and see the
 
 ### Goal
 
-A user with credits can execute `say_hello` on Sui testnet through the sponsored transaction flow and see the result in the app-wide feed.
+A user with credits can execute the reference `say_hello` action on Sui testnet through the sponsored transaction flow and see the result in the app-wide feed.
+
+Status clarification:
+- The implemented slice currently binds the action route, SDK helper, and transaction validation directly to `say_hello`.
+- The desired product contract is generic metered action sponsorship. Celeris should meter and sponsor a registered `actionType` supplied by the app, while the developer app supplies the transaction kind.
+- Slice 4.1 bridges this gap.
 
 ### Database work
 
@@ -545,13 +553,13 @@ A user with credits can execute `say_hello` on Sui testnet through the sponsored
 - Add shared TS helpers for:
   - address and object ID validation
   - username normalization
-  - canonical `say_hello` transaction construction
-  - exact-match transaction validation
+  - reference `say_hello` transaction construction
+  - sponsorship-policy validation
 
 ### Express work
 
-- Implement `POST /v1/apps/:appId/actions/say_hello/execute`.
-- Implement `POST /v1/apps/:appId/actions/say_hello/complete`.
+- Implement `POST /v1/apps/:appId/actions/:actionType/execute`.
+- Implement `POST /v1/apps/:appId/actions/:actionType/complete`.
 - Implement `GET /v1/apps/:appId/transactions`.
 - Implement sponsor gas coin selection and locking.
 - Implement credit reserve on `execute`.
@@ -574,7 +582,7 @@ A user with credits can execute `say_hello` on Sui testnet through the sponsored
 
 ### SDK work
 
-- Build canonical `say_hello` transaction kind.
+- Build the reference `say_hello` transaction kind in the demo app, then submit it through the generic action execution API.
 - Call execute route.
 - Add zkLogin user signature.
 - Submit directly to Sui RPC.
@@ -583,7 +591,7 @@ A user with credits can execute `say_hello` on Sui testnet through the sponsored
 
 ### Test plan
 
-- invalid transaction kinds are rejected
+- transaction kinds that violate the app sponsorship policy are rejected
 - credits are reserved before sponsor signing
 - failed submission releases credits
 - successful submission records digest and explorer URL
@@ -594,6 +602,76 @@ A user with credits can execute `say_hello` on Sui testnet through the sponsored
 
 - A user can execute paid `say_hello` end to end.
 - The resulting transaction appears in the app-wide feed.
+
+## Slice 4.1: Generic Metered Sponsored Actions
+
+### Goal
+
+Replace the hard-coded `say_hello` action contract with a generic registry of developer-defined action types used for credit reservation, sponsorship, completion, and feed records.
+
+The reference demo still uses `say_hello`, but `say_hello` should be one configured action among many possible app action types, not a backend-special route or schema.
+
+### Database work
+
+- Update `ManagedAction` so `actionType` is developer-defined per app.
+- Store `creditUsage` and `isEnabled` for each action.
+- Add optional action display metadata if needed for dashboard/catalog UX.
+- Update reservations and transaction records to store generic action metadata instead of `username`/`message` fields as required columns.
+
+### Express work
+
+- Add developer action list and upsert routes:
+  - `GET /v1/developer/apps/:appId/actions`
+  - `PUT /v1/developer/apps/:appId/actions/:actionType`
+- Replace hard-coded user execution routes with:
+  - `POST /v1/apps/:appId/actions/:actionType/execute`
+  - `POST /v1/apps/:appId/actions/:actionType/complete`
+- On execute:
+  - require the action to exist and be enabled
+  - reserve `creditUsage`
+  - accept a developer-supplied transaction kind
+  - enforce app sponsorship policy before sponsor signing
+- Sponsorship policy must at minimum bind transactions to the app's configured chain and registered Sui package or program metadata.
+- Reject unregistered actions, disabled actions, insufficient credits, wrong-chain transactions, and transactions outside the sponsorship policy.
+- Keep credit capture/release and reconciliation idempotent.
+
+### SDK work
+
+- Add generic browser SDK execution:
+  - `client.actions.execute({ actionType, transactionKind, metadata? })`
+- Keep `client.actions.sayHello({ username })` only as a reference helper layered on top of the generic execute method.
+- Ensure the reference app builds the `say_hello` transaction kind outside the backend-special action path.
+
+### Next.js work
+
+- Make the developer action card create/update arbitrary action types with credit usage and enabled state.
+- Show the full configured action list.
+- Show catalog action pricing from the generic action list.
+- Keep the reference demo button mapped to the configured `say_hello` action.
+
+### Docs work
+
+- Update the walkthrough so action registration describes generic app actions.
+- Explain that Celeris meters and sponsors registered actions, while the developer app owns transaction-kind construction.
+- Document the sponsorship policy caveat so the sponsor wallet cannot sign unrelated arbitrary transactions.
+
+### Test plan
+
+- action type validation and uniqueness per app
+- developer action list and upsert API tests
+- catalog includes all enabled configured actions
+- execute rejects unknown and disabled action types
+- execute reserves the configured `creditUsage`
+- sponsorship policy rejects transactions outside the app's registered program scope
+- completion captures or releases credits for arbitrary action types
+- feed records preserve action type and metadata
+
+### Exit criteria
+
+- The developer dashboard can create and list arbitrary app action types.
+- The browser SDK can request sponsorship for any registered enabled action type.
+- The backend no longer requires a backend-special route or Move-function binding for each metered action.
+- The reference `say_hello` demo still works through the generic action execution path.
 
 ## Slice 5: SDK Consumer Hardening, Walkthrough, and Regression
 
@@ -769,7 +847,7 @@ Mitigation:
 
 The implementation is complete only when all of the following are true:
 
-- all seven slices are complete
+- all eight slices are complete, including Slice 4.1
 - the Move package is published and can be manually initialized
 - a brand new app can be created in Celeris from the setup console or developer API
 - the developer dashboard lives on the app origin while the reference consumer app lives on the demo origin
@@ -778,7 +856,7 @@ The implementation is complete only when all of the following are true:
 - the Next.js frontend app consumes the browser SDK for user flows
 - a user can sign in with real Google + zkLogin
 - a user can buy credits
-- a user can execute paid `say_hello`
+- a user can execute the registered paid `say_hello` reference action through the generic action path
 - the transaction feed renders the resulting entry with Explorer link
 - `npm run typecheck` passes
 - `npm test` passes

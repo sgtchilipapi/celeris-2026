@@ -47,6 +47,10 @@ describe("DemoConsumerShell", () => {
             catalog: {
               appId: "app_123",
               chainId: "sui:testnet",
+              creditsPricing: {
+                creditsPerUsd: 500,
+                updatedAt: "2026-06-16T00:00:00.000Z"
+              },
               registeredProgram: null,
               actions: [
                 {
@@ -117,6 +121,7 @@ describe("DemoConsumerShell", () => {
     expect(screen.getByText("app_consumer:app_123")).toBeInTheDocument();
     expect(screen.getByText(session.user.walletAddress)).toBeInTheDocument();
     expect(screen.getByText("100 credits")).toBeInTheDocument();
+    expect(screen.getByText("500 credits per $1")).toBeInTheDocument();
     expect(screen.getByText("7 credits")).toBeInTheDocument();
   });
 });

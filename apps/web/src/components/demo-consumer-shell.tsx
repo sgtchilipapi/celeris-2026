@@ -10,6 +10,10 @@ import {
   type AppTransactionRecord,
   type AuthSession
 } from "@celeris/shared";
+import { Button } from "./ui/button";
+import { Card, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
 
 const demoAppIdStorageKey = "celeris.demo.appId";
 
@@ -39,7 +43,7 @@ export function DemoConsumerShell({
   const [statusMessage, setStatusMessage] = useState("Ready for demo sign-in.");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
-  const [checkoutCredits, setCheckoutCredits] = useState(100);
+  const [checkoutUsdAmount, setCheckoutUsdAmount] = useState(5);
   const [username, setUsername] = useState("");
   const [transactions, setTransactions] = useState<AppTransactionRecord[]>([]);
 
@@ -160,7 +164,7 @@ export function DemoConsumerShell({
 
     try {
       await client.credits.startCheckout({
-        credits: checkoutCredits,
+        usdAmount: checkoutUsdAmount,
         successRedirectUrl: new URL("/?checkout=success", demoFrontendOrigin).toString(),
         cancelRedirectUrl: new URL("/?checkout=canceled", demoFrontendOrigin).toString()
       });
@@ -196,7 +200,7 @@ export function DemoConsumerShell({
 
   return (
     <main className="workspace demo-workspace">
-      <section className="workspace-header">
+      <Card className="workspace-header">
         <div>
           <p className="workspace-kicker">Hello Celeris Demo</p>
           <h1>Reference consumer app</h1>
@@ -218,38 +222,38 @@ export function DemoConsumerShell({
             <dd>{apiOrigin}</dd>
           </div>
         </dl>
-      </section>
+      </Card>
 
       <section className="workspace-grid demo-grid">
-        <section className="workspace-band">
+        <Card className="workspace-band">
           <h2>App config</h2>
           <form className="form-grid" onSubmit={handleAppConfig}>
-            <label>
+            <Label>
               <span>App ID</span>
-              <input onChange={(event) => setAppId(event.target.value)} type="text" value={appId} />
-            </label>
-            <button className="button" type="submit">
+              <Input onChange={(event) => setAppId(event.target.value)} type="text" value={appId} />
+            </Label>
+            <Button type="submit">
               Use app
-            </button>
+            </Button>
           </form>
-        </section>
+        </Card>
 
-        <section className="workspace-band">
-          <div className="band-header">
+        <Card className="workspace-band">
+          <CardHeader>
             <div>
-              <h2>User session</h2>
-              <p>{statusMessage}</p>
+              <CardTitle>User session</CardTitle>
+              <CardDescription>{statusMessage}</CardDescription>
             </div>
             {session ? (
-              <button className="button secondary" disabled={isBusy} onClick={handleSignOut} type="button">
+              <Button variant="secondary" disabled={isBusy} onClick={handleSignOut} type="button">
                 Sign out
-              </button>
+              </Button>
             ) : (
-              <button className="button" disabled={isBusy || !appId} onClick={handleSignIn} type="button">
+              <Button disabled={isBusy || !appId} onClick={handleSignIn} type="button">
                 Sign in
-              </button>
+              </Button>
             )}
-          </div>
+          </CardHeader>
 
           <dl className="runtime-grid">
             <div>
@@ -265,19 +269,23 @@ export function DemoConsumerShell({
               <dd>{session ? `${session.clientKind}:${session.clientId}` : "Not signed in"}</dd>
             </div>
           </dl>
-        </section>
+        </Card>
 
-        <section className="workspace-band">
-          <div className="band-header">
+        <Card className="workspace-band">
+          <CardHeader>
             <div>
-              <h2>Credits</h2>
-              <p>Buy demo credits through hosted mock checkout.</p>
+              <CardTitle>Credits</CardTitle>
+              <CardDescription>Buy demo credits through hosted mock checkout.</CardDescription>
             </div>
-          </div>
+          </CardHeader>
           <dl className="runtime-grid">
             <div>
               <dt>Balance</dt>
               <dd>{balance ? `${balance.availableCredits} credits` : session ? "Loading" : "Sign in required"}</dd>
+            </div>
+            <div>
+              <dt>Credit rate</dt>
+              <dd>{catalog ? `${catalog.creditsPricing.creditsPerUsd} credits per $1` : "Loading"}</dd>
             </div>
             <div>
               <dt>Say hello price</dt>
@@ -285,51 +293,54 @@ export function DemoConsumerShell({
             </div>
           </dl>
           <form className="form-grid compact checkout-form" onSubmit={handleCheckout}>
-            <label>
-              <span>Credits</span>
-              <input
+            <Label>
+              <span>USD amount</span>
+              <Input
                 min="1"
-                onChange={(event) => setCheckoutCredits(Number(event.target.value))}
+                onChange={(event) => setCheckoutUsdAmount(Number(event.target.value))}
                 type="number"
-                value={checkoutCredits}
+                value={checkoutUsdAmount}
               />
-            </label>
-            <button className="button" disabled={isBusy || !session} type="submit">
+            </Label>
+            <p className="text-sm text-[#55635d]">
+              {catalog ? `${checkoutUsdAmount * catalog.creditsPricing.creditsPerUsd} credits` : "Credits calculate after catalog loads."}
+            </p>
+            <Button disabled={isBusy || !session} type="submit">
               Buy credits
-            </button>
+            </Button>
           </form>
-        </section>
+        </Card>
 
-        <section className="workspace-band">
-          <div className="band-header">
+        <Card className="workspace-band">
+          <CardHeader>
             <div>
-              <h2>Say Hello</h2>
-              <p>Execute the configured sponsored action with demo credits.</p>
+              <CardTitle>Say Hello</CardTitle>
+              <CardDescription>Execute the configured sponsored action with demo credits.</CardDescription>
             </div>
-          </div>
+          </CardHeader>
           <form className="form-grid compact" onSubmit={handleSayHello}>
-            <label>
+            <Label>
               <span>Username</span>
-              <input
+              <Input
                 maxLength={32}
                 onChange={(event) => setUsername(event.target.value)}
                 type="text"
                 value={username}
               />
-            </label>
-            <button className="button" disabled={isBusy || !session || !sayHelloAction} type="submit">
+            </Label>
+            <Button disabled={isBusy || !session || !sayHelloAction} type="submit">
               Say Hello Celeris
-            </button>
+            </Button>
           </form>
-        </section>
+        </Card>
 
-        <section className="workspace-band">
-          <div className="band-header">
+        <Card className="workspace-band">
+          <CardHeader>
             <div>
-              <h2>Feed</h2>
-              <p>Newest managed transactions for this app.</p>
+              <CardTitle>Feed</CardTitle>
+              <CardDescription>Newest managed transactions for this app.</CardDescription>
             </div>
-          </div>
+          </CardHeader>
           <div className="list-stack">
             {transactions.length > 0 ? (
               transactions.map((transaction) => (
@@ -343,13 +354,13 @@ export function DemoConsumerShell({
               <p className="empty-state">No transactions recorded yet.</p>
             )}
           </div>
-        </section>
+        </Card>
       </section>
 
       {errorMessage ? (
-        <section className="status-band error">
+        <Card className="status-band error">
           <p>{errorMessage}</p>
-        </section>
+        </Card>
       ) : null}
     </main>
   );

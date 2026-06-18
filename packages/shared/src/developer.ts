@@ -69,6 +69,7 @@ export const authLoginRequestSchema = z.object({
   loginRequestId: z.string().min(1),
   clientKind: authClientKindSchema,
   clientId: z.string().min(1),
+  clientName: z.string().min(1),
   appId: z.string().min(1).nullable().optional(),
   redirectUri: z.string().url(),
   state: z.string().min(1),
@@ -169,6 +170,15 @@ export const configureSayHelloSchema = z.object({
   isEnabled: z.boolean().default(true)
 });
 
+export const creditsPricingSchema = z.object({
+  creditsPerUsd: z.number().int().positive(),
+  updatedAt: z.string().datetime()
+});
+
+export const configureCreditsPricingSchema = z.object({
+  creditsPerUsd: z.coerce.number().int().positive().max(1_000_000)
+});
+
 export const catalogActionSchema = z.object({
   actionType: z.literal(CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO),
   priceCredits: z.number().int().nonnegative(),
@@ -178,6 +188,7 @@ export const catalogActionSchema = z.object({
 export const appCatalogSchema = z.object({
   appId: z.string().min(1),
   chainId: chainIdSchema,
+  creditsPricing: creditsPricingSchema,
   actions: z.array(catalogActionSchema),
   registeredProgram: registeredProgramSchema.nullable()
 });
@@ -204,7 +215,7 @@ export const checkoutSessionStatusSchema = z.union([
 ]);
 
 export const createCheckoutSessionSchema = z.object({
-  credits: z.coerce.number().int().positive().max(100_000),
+  usdAmount: z.coerce.number().int().positive().max(10_000),
   successRedirectUrl: z.string().url().optional(),
   cancelRedirectUrl: z.string().url().optional()
 });
@@ -214,6 +225,8 @@ export const checkoutSessionSchema = z.object({
   appId: z.string().min(1),
   walletAddress: suiAddressSchema,
   chainId: chainIdSchema,
+  usdAmount: z.number().int().positive(),
+  creditsPerUsd: z.number().int().positive(),
   credits: z.number().int().positive(),
   status: checkoutSessionStatusSchema,
   checkoutUrl: z.string().url(),
@@ -301,6 +314,7 @@ export const developerAppSchema = z.object({
   sponsorWallet: sponsorWalletSchema.nullable(),
   registeredProgram: registeredProgramSchema.nullable(),
   sayHelloAction: managedActionSchema.nullable(),
+  creditsPricing: creditsPricingSchema,
   sdkConfig: z.object({
     appId: z.string().min(1),
     allowedChainId: chainIdSchema,
@@ -329,6 +343,10 @@ export const registeredProgramResponseSchema = z.object({
 
 export const managedActionResponseSchema = z.object({
   sayHelloAction: managedActionSchema
+});
+
+export const creditsPricingResponseSchema = z.object({
+  creditsPricing: creditsPricingSchema
 });
 
 export function deriveDeterministicWalletAddress(subject: string) {
@@ -380,6 +398,8 @@ export type RegisteredProgram = z.infer<typeof registeredProgramSchema>;
 export type RegisterProgramInput = z.infer<typeof registerProgramSchema>;
 export type ManagedAction = z.infer<typeof managedActionSchema>;
 export type ConfigureSayHelloInput = z.infer<typeof configureSayHelloSchema>;
+export type CreditsPricing = z.infer<typeof creditsPricingSchema>;
+export type ConfigureCreditsPricingInput = z.infer<typeof configureCreditsPricingSchema>;
 export type CatalogAction = z.infer<typeof catalogActionSchema>;
 export type AppCatalog = z.infer<typeof appCatalogSchema>;
 export type AppBalance = z.infer<typeof appBalanceSchema>;
