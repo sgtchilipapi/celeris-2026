@@ -43,9 +43,11 @@ export async function buyCredits(credits: number) {
   return celeris.credits.startCheckout({ credits });
 }
 
-export async function sayHello(username: string) {
-  return celeris.actions.sayHello({ username });
+export async function sayHello(username: string, appStateObjectId: string) {
+  return celeris.actions.sayHello({ appStateObjectId, username });
 }
 ```
+
+For custom actions, build a Sui `Transaction` in the app and call `celeris.actions.execute({ actionType, transaction, metadata })`. Celeris meters by the registered `actionType`; the SDK serializes the transaction-kind bytes for sponsorship.
 
 The SDK stores bearer sessions and zkLogin ephemeral material in `sessionStorage`. Do not mirror these values into `localStorage`.

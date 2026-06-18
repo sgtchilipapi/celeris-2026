@@ -5,12 +5,14 @@ import {
   developerAppListResponseSchema,
   developerAppResponseSchema,
   developerProfileResponseSchema,
+  managedActionListResponseSchema,
   managedActionResponseSchema,
   meResponseSchema,
   registerProgramSchema,
   registeredProgramResponseSchema,
   sponsorWalletResponseSchema,
   type ConfigureCreditsPricingInput,
+  type ConfigureManagedActionInput,
   type ConfigureSayHelloInput,
   type CreateAuthLoginRequestInput,
   type CreateDeveloperAppInput
@@ -202,6 +204,25 @@ export function createCelerisServerClient(config: CelerisServerClientConfig) {
             method: "GET"
           },
           registeredProgramResponseSchema
+        ),
+      listActions: async (appId: string) =>
+        requestJson(
+          config,
+          `/v1/developer/apps/${appId}/actions`,
+          {
+            method: "GET"
+          },
+          managedActionListResponseSchema
+        ),
+      configureAction: async (appId: string, actionType: string, input: ConfigureManagedActionInput) =>
+        requestJson(
+          config,
+          `/v1/developer/apps/${appId}/actions/${encodeURIComponent(actionType)}`,
+          {
+            method: "PUT",
+            body: JSON.stringify(input)
+          },
+          managedActionResponseSchema
         ),
       configureSayHello: async (appId: string, input: ConfigureSayHelloInput) =>
         requestJson(

@@ -50,7 +50,10 @@ Fresh-start monorepo bootstrap for the Celeris MVP.
   - `NEXT_PUBLIC_DEVELOPER_APP_ORIGIN`
   - `NEXT_PUBLIC_DEMO_FRONTEND_ORIGIN`
   - `NEXT_PUBLIC_HOSTED_AUTH_ORIGIN`
+- Reference consumer demo config lives in `.env.demo`:
   - `NEXT_PUBLIC_DEMO_APP_ID` for preconfiguring the reference consumer app
+  - `HELLO_CELERIS_PACKAGE_ID`
+  - `HELLO_CELERIS_APP_STATE_OBJECT_ID`
 
 ## Real Google + zkLogin Auth
 
@@ -66,6 +69,7 @@ Fresh-start monorepo bootstrap for the Celeris MVP.
 ## Local Auth Runtime
 
 - Copy `.env.example` to `.env.local` and set the Google OAuth and zkLogin values explicitly.
+- Copy `.env.demo.example` to `.env.demo` when running the reference consumer demo locally.
 - `CELERIS_GOOGLE_REDIRECT_URI` must point at `GET /v1/auth/google/callback` on the API origin you are actually serving.
 - `CELERIS_ZKLOGIN_PROVER_ORIGIN` must point at a reachable prover process before demo user sign-in can complete.
 - Tests can still inject mock Google/prover adapters directly, but the runtime API path now requires explicit env configuration.

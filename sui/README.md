@@ -20,8 +20,10 @@ Use the Sui CLI manually against testnet:
    `npm run sui:move:build`
    `npm run sui:move:test`
 2. Publish `sui/hello-celeris` with your funded Sui testnet account and capture the new package ID from the CLI output.
-3. Call `initialize_app` on the published package and capture the created shared `AppState` object ID plus the owned `AppAuthorityCap` object ID.
+3. Call `initialize_app` on the published package and capture the created shared `AppState` object ID.
 4. Register those IDs against your Celeris app with `scripts/register-sui-package.ts`.
+
+If this package changes, republish and register the new package ID before running the demo.
 
 Typical CLI shape:
 
@@ -32,7 +34,6 @@ sui client call \
   --package <package-id> \
   --module hello_celeris \
   --function initialize_app \
-  --args <app-id> \
   --gas-budget <gas-budget>
 ```
 

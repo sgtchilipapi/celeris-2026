@@ -57,6 +57,7 @@ export interface UserSessionRecord {
   walletAddress: string;
   chainId: string;
   tokenHash: string;
+  zkLoginMaxEpoch: number | null;
   zkLoginProofInputsJson: string | null;
   expiresAt: Date;
   createdAt: Date;
@@ -93,8 +94,6 @@ export interface RegisteredProgramRecord {
   chainFamily: string;
   network: string;
   packageId: string;
-  appStateObjectId: string;
-  authorityCapObjectId: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -131,8 +130,9 @@ export interface PendingActionReservationRecord {
   chainId: string;
   actionType: string;
   status: string;
-  username: string;
-  message: string;
+  metadataJson: string | null;
+  username: string | null;
+  message: string | null;
   creditsReserved: number;
   transactionBytes: string;
   sponsorSignature: string;
@@ -162,8 +162,9 @@ export interface TransactionRecordRecord {
   walletAddress: string;
   chainId: string;
   actionType: string;
-  username: string;
-  message: string;
+  metadataJson: string | null;
+  username: string | null;
+  message: string | null;
   digest: string;
   explorerUrl: string;
   status: string;
@@ -176,6 +177,7 @@ export interface DeveloperAppAggregateRecord {
   app: AppRecord;
   sponsorWallet: SponsorWalletRecord | null;
   registeredProgram: RegisteredProgramRecord | null;
+  actions: ManagedActionRecord[];
   sayHelloAction: ManagedActionRecord | null;
 }
 
@@ -235,6 +237,7 @@ export interface CreateUserSessionInput {
   walletAddress: string;
   chainId: string;
   tokenHash: string;
+  zkLoginMaxEpoch?: number | null;
   zkLoginProofInputsJson?: string | null;
   expiresAt: Date;
 }
@@ -256,12 +259,11 @@ export interface UpsertSponsorWalletInput {
 export interface UpsertRegisteredProgramInput {
   appId: string;
   packageId: string;
-  appStateObjectId: string;
-  authorityCapObjectId: string;
 }
 
 export interface UpsertManagedActionInput {
   appId: string;
+  actionType: string;
   priceCredits: number;
   isEnabled: boolean;
 }
@@ -298,8 +300,10 @@ export interface CreatePendingActionReservationInput {
   appId: string;
   walletAddress: string;
   chainId: string;
-  username: string;
-  message: string;
+  actionType: string;
+  metadataJson?: string | null;
+  username?: string | null;
+  message?: string | null;
   creditsReserved: number;
   transactionBytes: string;
   sponsorSignature: string;
@@ -342,6 +346,7 @@ export interface DeveloperSetupRepository {
   upsertRegisteredProgram(input: UpsertRegisteredProgramInput): Promise<RegisteredProgramRecord>;
   findRegisteredProgramByAppId(appId: string): Promise<RegisteredProgramRecord | null>;
   upsertManagedAction(input: UpsertManagedActionInput): Promise<ManagedActionRecord>;
+  listManagedActions(appId: string): Promise<ManagedActionRecord[]>;
   updateAppCreditsPricing(input: UpdateAppCreditsPricingInput): Promise<DeveloperAppAggregateRecord | null>;
   createCheckoutSession(input: CreateCheckoutSessionRecordInput): Promise<CheckoutSessionRecord>;
   findCheckoutSessionById(appId: string, checkoutSessionId: string): Promise<CheckoutSessionRecord | null>;
@@ -390,6 +395,7 @@ function fromPrismaAppAggregate(record: {
     },
     sponsorWallet: record.sponsorWallets[0] ?? null,
     registeredProgram: record.registeredPrograms[0] ?? null,
+    actions: record.actions,
     sayHelloAction: extractSayHelloAction(record.actions)
   };
 }
@@ -509,6 +515,7 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
           walletAddress: input.walletAddress,
           chainId: input.chainId,
           tokenHash: input.tokenHash,
+          zkLoginMaxEpoch: input.zkLoginMaxEpoch ?? null,
           zkLoginProofInputsJson: input.zkLoginProofInputsJson ?? null,
           expiresAt: input.expiresAt
         }
@@ -540,6 +547,7 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
           walletAddress: record.walletAddress,
           chainId: record.chainId,
           tokenHash: record.tokenHash,
+          zkLoginMaxEpoch: record.zkLoginMaxEpoch,
           zkLoginProofInputsJson: record.zkLoginProofInputsJson,
           expiresAt: record.expiresAt,
           createdAt: record.createdAt,
@@ -649,17 +657,13 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
           }
         },
         update: {
-          packageId: input.packageId,
-          appStateObjectId: input.appStateObjectId,
-          authorityCapObjectId: input.authorityCapObjectId
+          packageId: input.packageId
         },
         create: {
           appId: input.appId,
           chainFamily: CELERIS_CHAIN_FAMILY_SUI,
           network: CELERIS_NETWORK_TESTNET,
-          packageId: input.packageId,
-          appStateObjectId: input.appStateObjectId,
-          authorityCapObjectId: input.authorityCapObjectId
+          packageId: input.packageId
         }
       });
     },
@@ -679,7 +683,7 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
         where: {
           appId_actionType: {
             appId: input.appId,
-            actionType: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO
+            actionType: input.actionType
           }
         },
         update: {
@@ -688,10 +692,16 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
         },
         create: {
           appId: input.appId,
-          actionType: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
+          actionType: input.actionType,
           priceCredits: input.priceCredits,
           isEnabled: input.isEnabled
         }
+      });
+    },
+    async listManagedActions(appId) {
+      return prisma.managedAction.findMany({
+        where: { appId },
+        orderBy: { actionType: "asc" }
       });
     },
     async updateAppCreditsPricing(input) {
@@ -808,10 +818,11 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
             appId: input.appId,
             walletAddress: input.walletAddress,
             chainId: input.chainId,
-            actionType: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
+            actionType: input.actionType,
             status: "reserved",
-            username: input.username,
-            message: input.message,
+            metadataJson: input.metadataJson ?? null,
+            username: input.username ?? null,
+            message: input.message ?? null,
             creditsReserved: input.creditsReserved,
             transactionBytes: input.transactionBytes,
             sponsorSignature: input.sponsorSignature,
@@ -968,6 +979,7 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
             walletAddress: input.walletAddress,
             chainId: reservation.chainId,
             actionType: reservation.actionType,
+            metadataJson: reservation.metadataJson,
             username: reservation.username,
             message: reservation.message,
             digest: input.digest,
@@ -1001,7 +1013,7 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
   const apps = new Map<string, AppRecord>();
   const sponsorWalletsByAppId = new Map<string, SponsorWalletRecord>();
   const programsByAppId = new Map<string, RegisteredProgramRecord>();
-  const actionsByAppId = new Map<string, ManagedActionRecord>();
+  const actionsByAppId = new Map<string, Map<string, ManagedActionRecord>>();
   const checkoutSessions = new Map<string, CheckoutSessionRecord>();
   const pendingActionReservations = new Map<string, PendingActionReservationRecord>();
   const transactionRecords = new Map<string, TransactionRecordRecord>();
@@ -1019,11 +1031,15 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
   }
 
   function getAggregate(app: AppRecord): DeveloperAppAggregateRecord {
+    const actions = Array.from(actionsByAppId.get(app.id)?.values() ?? []).sort((left, right) =>
+      left.actionType.localeCompare(right.actionType)
+    );
     return {
       app,
       sponsorWallet: sponsorWalletsByAppId.get(app.id) ?? null,
       registeredProgram: programsByAppId.get(app.id) ?? null,
-      sayHelloAction: actionsByAppId.get(app.id) ?? null
+      actions,
+      sayHelloAction: extractSayHelloAction(actions)
     };
   }
 
@@ -1161,6 +1177,7 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
         walletAddress: input.walletAddress,
         chainId: input.chainId,
         tokenHash: input.tokenHash,
+        zkLoginMaxEpoch: input.zkLoginMaxEpoch ?? null,
         zkLoginProofInputsJson: input.zkLoginProofInputsJson ?? null,
         expiresAt: input.expiresAt,
         createdAt: now,
@@ -1256,8 +1273,6 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
         chainFamily: CELERIS_CHAIN_FAMILY_SUI,
         network: CELERIS_NETWORK_TESTNET,
         packageId: input.packageId,
-        appStateObjectId: input.appStateObjectId,
-        authorityCapObjectId: input.authorityCapObjectId,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now
       };
@@ -1269,20 +1284,27 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
       return programsByAppId.get(appId) ?? null;
     },
     async upsertManagedAction(input) {
-      const existing = actionsByAppId.get(input.appId);
+      const actions = actionsByAppId.get(input.appId) ?? new Map<string, ManagedActionRecord>();
+      const existing = actions.get(input.actionType);
       const now = new Date();
       const record: ManagedActionRecord = {
         id: existing?.id ?? makeId("action"),
         appId: input.appId,
-        actionType: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
+        actionType: input.actionType,
         priceCredits: input.priceCredits,
         isEnabled: input.isEnabled,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now
       };
 
-      actionsByAppId.set(input.appId, record);
+      actions.set(record.actionType, record);
+      actionsByAppId.set(input.appId, actions);
       return record;
+    },
+    async listManagedActions(appId) {
+      return Array.from(actionsByAppId.get(appId)?.values() ?? []).sort((left, right) =>
+        left.actionType.localeCompare(right.actionType)
+      );
     },
     async updateAppCreditsPricing(input) {
       const existing = apps.get(input.appId);
@@ -1376,10 +1398,11 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
         appId: input.appId,
         walletAddress: input.walletAddress,
         chainId: input.chainId,
-        actionType: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
+        actionType: input.actionType,
         status: "reserved",
-        username: input.username,
-        message: input.message,
+        metadataJson: input.metadataJson ?? null,
+        username: input.username ?? null,
+        message: input.message ?? null,
         creditsReserved: input.creditsReserved,
         transactionBytes: input.transactionBytes,
         sponsorSignature: input.sponsorSignature,
@@ -1446,6 +1469,7 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
         walletAddress: captured.walletAddress,
         chainId: captured.chainId,
         actionType: captured.actionType,
+        metadataJson: captured.metadataJson,
         username: captured.username,
         message: captured.message,
         digest: input.digest,

@@ -145,30 +145,35 @@ export const registeredProgramSchema = z.object({
   chainFamily: z.literal(CELERIS_CHAIN_FAMILY_SUI),
   network: z.literal(CELERIS_NETWORK_TESTNET),
   packageId: suiPackageIdSchema,
-  appStateObjectId: suiObjectIdSchema,
-  authorityCapObjectId: suiObjectIdSchema,
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()
 });
 
 export const registerProgramSchema = z.object({
-  packageId: suiPackageIdSchema,
-  appStateObjectId: suiObjectIdSchema,
-  authorityCapObjectId: suiObjectIdSchema
+  packageId: suiPackageIdSchema
 });
 
+export const managedActionTypeSchema = z
+  .string()
+  .trim()
+  .min(1, "actionType is required")
+  .max(64, "actionType must be at most 64 characters")
+  .regex(/^[a-z][a-z0-9_:-]*$/, "actionType must start with a lowercase letter and use lowercase letters, numbers, underscores, colons, or dashes")
+  .transform((value) => value.toLowerCase());
+
 export const managedActionSchema = z.object({
-  actionType: z.literal(CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO),
+  actionType: managedActionTypeSchema,
   priceCredits: z.number().int().nonnegative(),
   isEnabled: z.boolean(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()
 });
 
-export const configureSayHelloSchema = z.object({
+export const configureManagedActionSchema = z.object({
   priceCredits: z.coerce.number().int().nonnegative(),
   isEnabled: z.boolean().default(true)
 });
+export const configureSayHelloSchema = configureManagedActionSchema;
 
 export const creditsPricingSchema = z.object({
   creditsPerUsd: z.number().int().positive(),
@@ -180,7 +185,7 @@ export const configureCreditsPricingSchema = z.object({
 });
 
 export const catalogActionSchema = z.object({
-  actionType: z.literal(CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO),
+  actionType: managedActionTypeSchema,
   priceCredits: z.number().int().nonnegative(),
   isEnabled: z.boolean()
 });
@@ -245,25 +250,37 @@ export const completeCheckoutSessionResponseSchema = z.object({
   balance: appBalanceSchema
 });
 
-export const executeSayHelloSchema = z.object({
-  username: z.string().trim().min(1),
-  transactionKind: z.unknown()
+export const actionMetadataSchema = z.record(z.string(), z.unknown());
+
+export const executeManagedActionSchema = z.object({
+  transactionKindBytes: z.string().trim().min(1),
+  transactionKind: z.unknown().optional(),
+  metadata: actionMetadataSchema.optional()
 });
 
-export const sayHelloSponsorshipSchema = z.object({
+export const executeSayHelloSchema = executeManagedActionSchema.extend({
+  username: z.string().trim().min(1).optional()
+});
+
+export const actionSponsorshipSchema = z.object({
   reservationId: z.string().min(1),
   transactionBytes: z.string().min(1),
   sponsorSignature: z.string().min(1),
   sponsorAddress: suiAddressSchema,
   expiresAt: z.string().datetime(),
-  username: z.string().min(1),
-  message: z.string().min(1)
+  actionType: managedActionTypeSchema,
+  metadata: actionMetadataSchema.nullable()
 });
 
-export const sayHelloSponsorshipResponseSchema = z.object({
-  sponsorship: sayHelloSponsorshipSchema,
+export const actionSponsorshipResponseSchema = z.object({
+  sponsorship: actionSponsorshipSchema,
   balance: appBalanceSchema
 });
+export const sayHelloSponsorshipSchema = actionSponsorshipSchema.extend({
+  username: z.string().min(1).optional(),
+  message: z.string().min(1).optional()
+});
+export const sayHelloSponsorshipResponseSchema = actionSponsorshipResponseSchema;
 
 export const completeSayHelloSchema = z.object({
   reservationId: z.string().min(1),
@@ -280,11 +297,12 @@ export const transactionRecordStatusSchema = z.union([
 export const transactionRecordSchema = z.object({
   transactionId: z.string().min(1),
   appId: z.string().min(1),
-  actionType: z.literal(CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO),
+  actionType: managedActionTypeSchema,
   walletAddress: suiAddressSchema,
   chainId: chainIdSchema,
-  username: z.string().min(1),
-  message: z.string().min(1),
+  metadata: actionMetadataSchema.nullable(),
+  username: z.string().min(1).nullable(),
+  message: z.string().min(1).nullable(),
   digest: z.string().min(1),
   explorerUrl: z.string().url(),
   status: transactionRecordStatusSchema,
@@ -313,6 +331,7 @@ export const developerAppSchema = z.object({
   updatedAt: z.string().datetime(),
   sponsorWallet: sponsorWalletSchema.nullable(),
   registeredProgram: registeredProgramSchema.nullable(),
+  actions: z.array(managedActionSchema).default([]),
   sayHelloAction: managedActionSchema.nullable(),
   creditsPricing: creditsPricingSchema,
   sdkConfig: z.object({
@@ -342,7 +361,12 @@ export const registeredProgramResponseSchema = z.object({
 });
 
 export const managedActionResponseSchema = z.object({
-  sayHelloAction: managedActionSchema
+  action: managedActionSchema.optional(),
+  sayHelloAction: managedActionSchema.optional()
+});
+
+export const managedActionListResponseSchema = z.object({
+  actions: z.array(managedActionSchema)
 });
 
 export const creditsPricingResponseSchema = z.object({
@@ -373,13 +397,11 @@ export function deriveZkLoginWalletAddress(input: { issuer: string; subject: str
 
 export function buildSayHelloTransactionKindForApi(input: {
   packageId: string;
-  authorityCapObjectId: string;
   appStateObjectId: string;
   username: string;
 }) {
   return buildHelloCelerisSayHelloTransaction({
     packageId: input.packageId,
-    appAuthorityCapObjectId: input.authorityCapObjectId,
     appStateObjectId: input.appStateObjectId,
     username: input.username
   }).transactionKind;
@@ -398,6 +420,8 @@ export type RegisteredProgram = z.infer<typeof registeredProgramSchema>;
 export type RegisterProgramInput = z.infer<typeof registerProgramSchema>;
 export type ManagedAction = z.infer<typeof managedActionSchema>;
 export type ConfigureSayHelloInput = z.infer<typeof configureSayHelloSchema>;
+export type ConfigureManagedActionInput = z.infer<typeof configureManagedActionSchema>;
+export type ExecuteManagedActionInput = z.infer<typeof executeManagedActionSchema>;
 export type CreditsPricing = z.infer<typeof creditsPricingSchema>;
 export type ConfigureCreditsPricingInput = z.infer<typeof configureCreditsPricingSchema>;
 export type CatalogAction = z.infer<typeof catalogActionSchema>;

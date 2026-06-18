@@ -144,7 +144,7 @@ These additions do not change product scope. They exist so the runtime can persi
 - `SponsorWallet`
   - `id`, `appId`, `chainFamily`, `network`, `address`, `encryptedSecret`, timestamps
 - `RegisteredProgram`
-  - `id`, `appId`, `chainFamily`, `network`, `packageId`, `appStateObjectId`, `authorityCapObjectId`, timestamps
+  - `id`, `appId`, `chainFamily`, `network`, `packageId`, timestamps
 
 ### User auth and identity
 
@@ -228,8 +228,8 @@ Target API shape:
 - `client.apps.getCatalog()`
 - `client.credits.getBalance()`
 - `client.credits.startCheckout()`
-- `client.actions.execute({ actionType, transactionKind, metadata? })`
-- optional reference helper: `client.actions.sayHello({ username })`
+- `client.actions.execute({ actionType, transaction, metadata? })`
+- optional reference helper: `client.actions.sayHello({ appStateObjectId, username })`
 - `client.transactions.list()`
 
 The SDK must own:
@@ -238,7 +238,8 @@ The SDK must own:
 - zkLogin ephemeral state generation
 - auth-code exchange
 - user bearer token storage in session-scoped storage
-- accepting developer-built transaction kinds for registered actions
+- accepting developer-built Sui `Transaction` objects for registered actions
+- serializing transactions to transaction-kind bytes for sponsorship API calls
 - sponsored transaction submission
 - completion reporting
 
@@ -328,7 +329,7 @@ A developer can create a new app, provision its sponsor wallet, register Sui pro
 - Allow a developer to:
   - create an app
   - provision a sponsor wallet
-  - enter `packageId`, `appStateObjectId`, and `authorityCapObjectId`
+  - enter `packageId`
   - configure action credit usage and enabled state
 - Add a simple frontend app config module that uses:
   - `appId`
@@ -536,7 +537,7 @@ A user with credits can execute the reference `say_hello` action on Sui testnet 
 
 Status clarification:
 - The implemented slice currently binds the action route, SDK helper, and transaction validation directly to `say_hello`.
-- The desired product contract is generic metered action sponsorship. Celeris should meter and sponsor a registered `actionType` supplied by the app, while the developer app supplies the transaction kind.
+- The desired product contract is generic metered action sponsorship. Celeris should meter and sponsor a registered `actionType` supplied by the app, while the developer app supplies a Sui `Transaction` and the Celeris SDK serializes it for sponsorship.
 - Slice 4.1 bridges this gap.
 
 ### Database work
@@ -582,7 +583,7 @@ Status clarification:
 
 ### SDK work
 
-- Build the reference `say_hello` transaction kind in the demo app, then submit it through the generic action execution API.
+- Build the reference `say_hello` `Transaction` in the demo app, then submit it through the generic action execution SDK API.
 - Call execute route.
 - Add zkLogin user signature.
 - Submit directly to Sui RPC.
@@ -626,10 +627,10 @@ The reference demo still uses `say_hello`, but `say_hello` should be one configu
 - Replace hard-coded user execution routes with:
   - `POST /v1/apps/:appId/actions/:actionType/execute`
   - `POST /v1/apps/:appId/actions/:actionType/complete`
-- On execute:
+- On API execute:
   - require the action to exist and be enabled
   - reserve `creditUsage`
-  - accept a developer-supplied transaction kind
+  - accept serialized transaction-kind bytes produced by the browser SDK
   - enforce app sponsorship policy before sponsor signing
 - Sponsorship policy must at minimum bind transactions to the app's configured chain and registered Sui package or program metadata.
 - Reject unregistered actions, disabled actions, insufficient credits, wrong-chain transactions, and transactions outside the sponsorship policy.
@@ -638,9 +639,10 @@ The reference demo still uses `say_hello`, but `say_hello` should be one configu
 ### SDK work
 
 - Add generic browser SDK execution:
-  - `client.actions.execute({ actionType, transactionKind, metadata? })`
-- Keep `client.actions.sayHello({ username })` only as a reference helper layered on top of the generic execute method.
-- Ensure the reference app builds the `say_hello` transaction kind outside the backend-special action path.
+  - `client.actions.execute({ actionType, transaction, metadata? })`
+- The SDK should use `@mysten/sui` to build transaction-kind bytes from the supplied `Transaction` for the API call.
+- Keep `client.actions.sayHello({ appStateObjectId, username })` only as a reference helper layered on top of the generic execute method.
+- Ensure the reference app builds the `say_hello` `Transaction` outside the backend-special action path.
 
 ### Next.js work
 
@@ -652,7 +654,7 @@ The reference demo still uses `say_hello`, but `say_hello` should be one configu
 ### Docs work
 
 - Update the walkthrough so action registration describes generic app actions.
-- Explain that Celeris meters and sponsors registered actions, while the developer app owns transaction-kind construction.
+- Explain that Celeris meters and sponsors registered actions, while the developer app owns Sui `Transaction` construction and the Celeris SDK handles transaction-kind serialization for sponsorship.
 - Document the sponsorship policy caveat so the sponsor wallet cannot sign unrelated arbitrary transactions.
 
 ### Test plan

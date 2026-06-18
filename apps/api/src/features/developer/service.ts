@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { toBase64 } from "@mysten/bcs";
+import { fromBase64, toBase64 } from "@mysten/bcs";
 import { SuiClient } from "@mysten/sui/client";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { Transaction } from "@mysten/sui/transactions";
+import { genAddressSeed } from "@mysten/sui/zklogin";
 import { z } from "zod";
 import {
   CELERIS_AUTH_CLIENT_ID_DEVELOPER_DASHBOARD,
@@ -16,6 +18,8 @@ import {
   authTokenExchangeSchema,
   chainIdSchema,
   type ConfigureSayHelloInput,
+  type ConfigureManagedActionInput,
+  configureManagedActionSchema,
   configureSayHelloSchema,
   type ConfigureCreditsPricingInput,
   configureCreditsPricingSchema,
@@ -29,9 +33,12 @@ import {
   completeSayHelloSchema,
   type DeveloperApp,
   type ExecuteSayHelloInput,
+  type ExecuteManagedActionInput,
+  executeManagedActionSchema,
   executeSayHelloSchema,
-  assertHelloCelerisTransactionKindValueMatches,
-  buildCanonicalHelloCelerisSayHelloTransaction,
+  managedActionTypeSchema,
+  normalizeHelloCelerisUsername,
+  renderHelloCelerisMessage,
   registerProgramSchema,
   type RegisterProgramInput,
   deriveZkLoginSalt,
@@ -102,8 +109,8 @@ export interface SponsoredTransactionPayload {
 }
 
 export interface SuiSponsorAdapter {
-  createSponsoredSayHello(input: {
-    transaction: ReturnType<typeof buildCanonicalHelloCelerisSayHelloTransaction>["transaction"];
+  createSponsoredAction(input: {
+    transactionKindBytes: string;
     userWalletAddress: string;
     sponsorWallet: SponsorWalletRecord;
     encryptionKey: string;
@@ -175,8 +182,6 @@ function toRegisteredProgram(record: RegisteredProgramRecord) {
     chainFamily: CELERIS_CHAIN_FAMILY_SUI,
     network: CELERIS_NETWORK_TESTNET,
     packageId: record.packageId,
-    appStateObjectId: record.appStateObjectId,
-    authorityCapObjectId: record.authorityCapObjectId,
     createdAt: toIsoString(record.createdAt),
     updatedAt: toIsoString(record.updatedAt)
   };
@@ -184,7 +189,7 @@ function toRegisteredProgram(record: RegisteredProgramRecord) {
 
 function toManagedAction(record: ManagedActionRecord) {
   return {
-    actionType: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
+    actionType: record.actionType,
     priceCredits: record.priceCredits,
     isEnabled: record.isEnabled,
     createdAt: toIsoString(record.createdAt),
@@ -201,7 +206,7 @@ function toCreditsPricing(record: DeveloperAppAggregateRecord["app"]) {
 
 function toCatalogAction(record: ManagedActionRecord) {
   return {
-    actionType: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
+    actionType: record.actionType,
     priceCredits: record.priceCredits,
     isEnabled: record.isEnabled
   };
@@ -221,6 +226,7 @@ function toDeveloperApp(
     updatedAt: toIsoString(aggregate.app.updatedAt),
     sponsorWallet: aggregate.sponsorWallet ? toSponsorWallet(aggregate.sponsorWallet) : null,
     registeredProgram: aggregate.registeredProgram ? toRegisteredProgram(aggregate.registeredProgram) : null,
+    actions: aggregate.actions.map(toManagedAction),
     sayHelloAction: aggregate.sayHelloAction ? toManagedAction(aggregate.sayHelloAction) : null,
     creditsPricing: toCreditsPricing(aggregate.app),
     sdkConfig: {
@@ -322,48 +328,45 @@ class RuntimeSuiSponsorAdapter implements SuiSponsorAdapter {
     });
   }
 
-  async createSponsoredSayHello(input: {
-    transaction: ReturnType<typeof buildCanonicalHelloCelerisSayHelloTransaction>["transaction"];
+  async createSponsoredAction(input: {
+    transactionKindBytes: string;
     userWalletAddress: string;
     sponsorWallet: SponsorWalletRecord;
     encryptionKey: string;
   }) {
     const keypair = Ed25519Keypair.fromSecretKey(decryptSecret(input.sponsorWallet.encryptedSecret, input.encryptionKey));
     const sponsorAddress = keypair.toSuiAddress();
-    const coins = await this.client.getCoins({
-      owner: sponsorAddress,
-      coinType: "0x2::sui::SUI",
-      limit: 1
-    });
-    const gasCoin = coins.data[0];
+    const transaction = Transaction.fromKind(fromBase64(input.transactionKindBytes));
+    transaction.setSender(input.userWalletAddress);
+    transaction.setGasOwner(sponsorAddress);
+    transaction.setGasBudget(DEFAULT_SUI_GAS_BUDGET);
+    let bytes: Uint8Array;
+    let signature: string;
+
+    try {
+      bytes = await transaction.build({
+        client: this.client
+      });
+      signature = (await keypair.signTransaction(bytes)).signature;
+    } catch (error) {
+      throw badGateway("Failed to build sponsored transaction", {
+        reason: error instanceof Error ? error.message : String(error)
+      });
+    }
+
+    const gasCoin = transaction.getData().gasData.payment?.[0];
 
     if (!gasCoin) {
       throw badGateway("Sponsor wallet has no SUI gas coins");
     }
-
-    input.transaction.setSender(input.userWalletAddress);
-    input.transaction.setGasOwner(sponsorAddress);
-    input.transaction.setGasBudget(DEFAULT_SUI_GAS_BUDGET);
-    input.transaction.setGasPayment([
-      {
-        objectId: gasCoin.coinObjectId,
-        version: gasCoin.version,
-        digest: gasCoin.digest
-      }
-    ]);
-
-    const bytes = await input.transaction.build({
-      client: this.client
-    });
-    const { signature } = await keypair.signTransaction(bytes);
 
     return {
       transactionBytes: toBase64(bytes),
       sponsorSignature: signature,
       sponsorAddress,
       gasCoin: {
-        objectId: gasCoin.coinObjectId,
-        version: gasCoin.version,
+        objectId: gasCoin.objectId,
+        version: String(gasCoin.version),
         digest: gasCoin.digest
       }
     };
@@ -771,7 +774,9 @@ export class DeveloperSetupService {
       loginRequestId: request.id,
       authCode,
       userIdentityId: userIdentity.id,
-      zkLoginProofInputsJson: proofInputs ? JSON.stringify(proofInputs) : null
+      zkLoginProofInputsJson: proofInputs
+        ? JSON.stringify(this.toSignatureReadyProofInputs(proofInputs, googleIdentity, userIdentity.salt))
+        : null
     });
 
     const redirectTo = new URL(completed.redirectUri);
@@ -821,6 +826,7 @@ export class DeveloperSetupService {
       walletAddress: userIdentity.walletAddress,
       chainId: "sui:testnet",
       tokenHash: sha256(token),
+      zkLoginMaxEpoch: request.maxEpoch,
       zkLoginProofInputsJson: request.zkLoginProofInputsJson,
       expiresAt
     });
@@ -868,7 +874,7 @@ export class DeveloperSetupService {
       zkLogin: {
         nonce: null,
         extendedEphemeralPublicKey: null,
-        maxEpoch: null,
+        maxEpoch: session.session.zkLoginMaxEpoch,
         proofInputs: parseProofInputs(session.session.zkLoginProofInputsJson)
       }
     };
@@ -966,9 +972,7 @@ export class DeveloperSetupService {
     const payload = registerProgramSchema.parse(input);
     const program = await this.repository.upsertRegisteredProgram({
       appId,
-      packageId: payload.packageId,
-      appStateObjectId: payload.appStateObjectId,
-      authorityCapObjectId: payload.authorityCapObjectId
+      packageId: payload.packageId
     });
 
     return toRegisteredProgram(program);
@@ -986,15 +990,31 @@ export class DeveloperSetupService {
   }
 
   async configureSayHello(developerProfileId: string, appId: string, input: ConfigureSayHelloInput) {
+    return this.configureAction(developerProfileId, appId, CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO, input);
+  }
+
+  async configureAction(
+    developerProfileId: string,
+    appId: string,
+    actionTypeInput: string,
+    input: ConfigureManagedActionInput
+  ) {
     await this.requireApp(developerProfileId, appId);
-    const payload = configureSayHelloSchema.parse(input);
+    const actionType = managedActionTypeSchema.parse(actionTypeInput);
+    const payload = configureManagedActionSchema.parse(input);
     const action = await this.repository.upsertManagedAction({
       appId,
+      actionType,
       priceCredits: payload.priceCredits,
       isEnabled: payload.isEnabled
     });
 
     return toManagedAction(action);
+  }
+
+  async listActions(developerProfileId: string, appId: string) {
+    await this.requireApp(developerProfileId, appId);
+    return (await this.repository.listManagedActions(appId)).map(toManagedAction);
   }
 
   async configureCreditsPricing(developerProfileId: string, appId: string, input: ConfigureCreditsPricingInput) {
@@ -1019,7 +1039,7 @@ export class DeveloperSetupService {
       appId: app.app.id,
       chainId: chainIdSchema.parse(app.app.allowedChainId),
       creditsPricing: toCreditsPricing(app.app),
-      actions: app.sayHelloAction ? [toCatalogAction(app.sayHelloAction)] : [],
+      actions: app.actions.filter((action) => action.isEnabled).map(toCatalogAction),
       registeredProgram: app.registeredProgram ? toRegisteredProgram(app.registeredProgram) : null
     };
   }
@@ -1087,9 +1107,14 @@ export class DeveloperSetupService {
   }
 
   async executeSayHello(session: AppConsumerSession, appId: string, input: ExecuteSayHelloInput) {
+    return this.executeAction(session, appId, CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO, input);
+  }
+
+  async executeAction(session: AppConsumerSession, appId: string, actionTypeInput: string, input: ExecuteManagedActionInput) {
     const appConsumer = this.requireAppConsumerSession(session, appId);
     const app = await this.requirePublicApp(appId);
-    const payload = executeSayHelloSchema.parse(input);
+    const actionType = managedActionTypeSchema.parse(actionTypeInput);
+    const payload = executeManagedActionSchema.parse(input);
 
     if (!app.registeredProgram) {
       throw badRequest("App Sui program is not registered");
@@ -1099,29 +1124,21 @@ export class DeveloperSetupService {
       throw badRequest("App sponsor wallet is not provisioned");
     }
 
-    if (!app.sayHelloAction?.isEnabled) {
-      throw badRequest("say_hello is not enabled for this app");
+    const action = app.actions.find((candidate) => candidate.actionType === actionType);
+
+    if (!action) {
+      throw badRequest(`${actionType} is not registered for this app`);
     }
 
-    const built = buildCanonicalHelloCelerisSayHelloTransaction({
-      registeredProgram: app.registeredProgram,
-      userWalletAddress: appConsumer.walletAddress,
-      username: payload.username
-    });
-
-    try {
-      assertHelloCelerisTransactionKindValueMatches(payload.transactionKind, {
-        packageId: app.registeredProgram.packageId,
-        appAuthorityCapObjectId: app.registeredProgram.authorityCapObjectId,
-        appStateObjectId: app.registeredProgram.appStateObjectId,
-        username: built.normalizedUsername
-      });
-    } catch (error) {
-      throw badRequest(error instanceof Error ? error.message : "Invalid transaction kind");
+    if (!action.isEnabled) {
+      throw badRequest(`${actionType} is not enabled for this app`);
     }
 
-    const sponsored = await this.suiSponsorAdapter.createSponsoredSayHello({
-      transaction: built.transaction,
+    const metadata = this.normalizeActionMetadata(actionType, payload.metadata ?? null);
+    this.assertTransactionKindBytesWithinRegisteredProgram(payload.transactionKindBytes, app.registeredProgram);
+
+    const sponsored = await this.suiSponsorAdapter.createSponsoredAction({
+      transactionKindBytes: payload.transactionKindBytes,
       userWalletAddress: appConsumer.walletAddress,
       sponsorWallet: app.sponsorWallet,
       encryptionKey: this.encryptionKey
@@ -1130,9 +1147,11 @@ export class DeveloperSetupService {
       appId,
       walletAddress: appConsumer.walletAddress,
       chainId: appConsumer.chainId,
-      username: built.normalizedUsername,
-      message: built.message,
-      creditsReserved: app.sayHelloAction.priceCredits,
+      actionType,
+      metadataJson: metadata ? JSON.stringify(metadata) : null,
+      username: typeof metadata?.username === "string" ? metadata.username : null,
+      message: typeof metadata?.message === "string" ? metadata.message : null,
+      creditsReserved: action.priceCredits,
       transactionBytes: sponsored.transactionBytes,
       sponsorSignature: sponsored.sponsorSignature,
       sponsorAddress: sponsored.sponsorAddress,
@@ -1158,13 +1177,22 @@ export class DeveloperSetupService {
   }
 
   async completeSayHello(session: AppConsumerSession, appId: string, input: CompleteSayHelloInput) {
+    return this.completeAction(session, appId, CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO, input);
+  }
+
+  async completeAction(session: AppConsumerSession, appId: string, actionTypeInput: string, input: CompleteSayHelloInput) {
     const appConsumer = this.requireAppConsumerSession(session, appId);
     await this.requirePublicApp(appId);
+    const actionType = managedActionTypeSchema.parse(actionTypeInput);
     const payload = completeSayHelloSchema.parse(input);
     const existing = await this.repository.findPendingActionReservationById(appId, payload.reservationId);
 
     if (!existing || existing.walletAddress !== appConsumer.walletAddress) {
       throw notFound("Action reservation not found");
+    }
+
+    if (existing.actionType !== actionType) {
+      throw badRequest("Action reservation type does not match route");
     }
 
     if (existing.expiresAt.getTime() <= Date.now() && existing.status === "reserved") {
@@ -1260,6 +1288,21 @@ export class DeveloperSetupService {
         aud: identity.audience,
         salt
       })
+    };
+  }
+
+  private toSignatureReadyProofInputs(
+    proofInputs: Record<string, unknown>,
+    identity: VerifiedGoogleIdentity,
+    salt: string
+  ) {
+    if (typeof proofInputs.addressSeed === "string" && proofInputs.addressSeed.length > 0) {
+      return proofInputs;
+    }
+
+    return {
+      ...proofInputs,
+      addressSeed: genAddressSeed(salt, "sub", identity.subject, identity.audience).toString()
     };
   }
 
@@ -1363,24 +1406,29 @@ export class DeveloperSetupService {
   }
 
   private toSponsorship(record: PendingActionReservationRecord) {
+    const metadata = this.parseActionMetadata(record.metadataJson);
     return {
       reservationId: record.id,
       transactionBytes: record.transactionBytes,
       sponsorSignature: record.sponsorSignature,
       sponsorAddress: record.sponsorAddress,
       expiresAt: record.expiresAt.toISOString(),
-      username: record.username,
-      message: record.message
+      actionType: record.actionType,
+      metadata,
+      username: record.username ?? undefined,
+      message: record.message ?? undefined
     };
   }
 
   private toTransactionRecord(record: TransactionRecordRecord) {
+    const metadata = this.parseActionMetadata(record.metadataJson);
     return {
       transactionId: record.id,
       appId: record.appId,
-      actionType: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
+      actionType: record.actionType,
       walletAddress: record.walletAddress,
       chainId: chainIdSchema.parse(record.chainId),
+      metadata,
       username: record.username,
       message: record.message,
       digest: record.digest,
@@ -1393,6 +1441,60 @@ export class DeveloperSetupService {
 
   private toExplorerUrl(digest: string) {
     return `https://suiexplorer.com/txblock/${encodeURIComponent(digest)}?network=testnet`;
+  }
+
+  private assertTransactionKindBytesWithinRegisteredProgram(
+    transactionKindBytes: string,
+    registeredProgram: RegisteredProgramRecord
+  ) {
+    let transactionData: unknown;
+
+    try {
+      transactionData = Transaction.fromKind(fromBase64(transactionKindBytes)).getData();
+    } catch {
+      return;
+    }
+
+    const serialized = JSON.stringify(transactionData).toLowerCase();
+    const packageId = registeredProgram.packageId.toLowerCase();
+
+    if (!serialized.includes(packageId)) {
+      throw badRequest("Transaction kind is outside the app sponsorship policy");
+    }
+  }
+
+  private normalizeActionMetadata(actionType: string, metadata: Record<string, unknown> | null) {
+    if (actionType !== CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO) {
+      return metadata;
+    }
+
+    const username = typeof metadata?.username === "string" ? metadata.username : "";
+    let normalizedUsername: string;
+
+    try {
+      normalizedUsername = normalizeHelloCelerisUsername(username);
+    } catch (error) {
+      throw badRequest(error instanceof Error ? error.message : "Invalid say_hello metadata");
+    }
+
+    return {
+      ...(metadata ?? {}),
+      username: normalizedUsername,
+      message: renderHelloCelerisMessage(normalizedUsername)
+    };
+  }
+
+  private parseActionMetadata(metadataJson: string | null) {
+    if (!metadataJson) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(metadataJson) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
   }
 }
 

@@ -23,6 +23,7 @@ interface DemoConsumerShellProps {
   demoFrontendOrigin: string;
   suiRpcOrigin: string;
   initialAppId?: string;
+  initialAppStateObjectId?: string;
 }
 
 function toErrorMessage(error: unknown) {
@@ -34,7 +35,8 @@ export function DemoConsumerShell({
   hostedAuthOrigin,
   demoFrontendOrigin,
   suiRpcOrigin,
-  initialAppId = ""
+  initialAppId = "",
+  initialAppStateObjectId = ""
 }: DemoConsumerShellProps) {
   const [appId, setAppId] = useState(initialAppId);
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -97,6 +99,7 @@ export function DemoConsumerShell({
   }, [client]);
 
   const sayHelloAction = catalog?.actions.find((action) => action.actionType === CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO) ?? null;
+  const enabledActions = catalog?.actions ?? [];
 
   async function handleAppConfig(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -182,11 +185,16 @@ export function DemoConsumerShell({
       return;
     }
 
+    if (!initialAppStateObjectId.trim()) {
+      setErrorMessage("HELLO_CELERIS_APP_STATE_OBJECT_ID is required in .env.demo.");
+      return;
+    }
+
     setIsBusy(true);
     setErrorMessage(null);
 
     try {
-      const result = await client.actions.sayHello({ username });
+      const result = await client.actions.sayHello({ appStateObjectId: initialAppStateObjectId, username });
       setBalance(result.balance);
       setTransactions(await client.transactions.list());
       setStatusMessage(`Submitted ${result.message}`);
@@ -291,6 +299,10 @@ export function DemoConsumerShell({
               <dt>Say hello price</dt>
               <dd>{sayHelloAction ? `${sayHelloAction.priceCredits} credits` : "Not configured"}</dd>
             </div>
+            <div>
+              <dt>Configured actions</dt>
+              <dd>{enabledActions.length > 0 ? enabledActions.map((action) => action.actionType).join(", ") : "None"}</dd>
+            </div>
           </dl>
           <form className="form-grid compact checkout-form" onSubmit={handleCheckout}>
             <Label>
@@ -328,7 +340,7 @@ export function DemoConsumerShell({
                 value={username}
               />
             </Label>
-            <Button disabled={isBusy || !session || !sayHelloAction} type="submit">
+            <Button disabled={isBusy || !session || !sayHelloAction || !initialAppStateObjectId.trim()} type="submit">
               Say Hello Celeris
             </Button>
           </form>
@@ -345,7 +357,7 @@ export function DemoConsumerShell({
             {transactions.length > 0 ? (
               transactions.map((transaction) => (
                 <a className="list-row" href={transaction.explorerUrl} key={transaction.transactionId}>
-                  <strong>{transaction.message}</strong>
+                  <strong>{transaction.message ?? transaction.actionType}</strong>
                   <small>{transaction.digest}</small>
                   <small>{transaction.walletAddress}</small>
                 </a>

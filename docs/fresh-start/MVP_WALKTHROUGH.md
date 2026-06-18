@@ -105,18 +105,17 @@ Record the published `packageId`.
 
 ## 7. Run `initialize_app`
 
-Call the initializer with the Celeris app ID from the dashboard:
+Call the initializer to create a shared app state object:
 
 ```bash
 sui client call \
   --package <packageId> \
   --module hello_celeris \
   --function initialize_app \
-  --args <celeris-app-id> \
   --gas-budget 50000000
 ```
 
-Record the created shared `AppState` object ID and owned `AppAuthorityCap` object ID from the command output.
+Record the created shared `AppState` object ID from the command output.
 
 ## 8. Register Program Metadata
 
@@ -124,11 +123,11 @@ Back in the developer dashboard, register:
 
 ```text
 packageId=<packageId>
-appStateObjectId=<AppState object ID>
-authorityCapObjectId=<AppAuthorityCap object ID>
 ```
 
-Then configure the `say_hello` action price, for example `5` credits, and leave it enabled.
+Keep `appStateObjectId=<AppState object ID>` in the demo app's transaction-building config.
+
+Then configure one or more metered actions in the dashboard. For the reference demo, create or update the `say_hello` action with a price such as `5` credits and leave it enabled.
 
 ## 9. Configure The Reference Demo App
 
@@ -138,7 +137,7 @@ Open the demo surface:
 http://localhost:3103
 ```
 
-Paste the Celeris app ID into the App ID field and save it. The reference frontend uses only the public browser SDK API described in [the Next.js SDK example](../examples/nextjs-sdk-consumer.md).
+Paste the Celeris app ID into the App ID field and save it. The reference frontend builds the `say_hello` Sui transaction, then uses the public browser SDK generic action execution API described in [the Next.js SDK example](../examples/nextjs-sdk-consumer.md).
 
 ## 10. User Sign-In, Purchase, And Execute
 

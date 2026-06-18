@@ -89,6 +89,7 @@ model UserSession {
   walletAddress  String
   chainId        String
   tokenHash      String       @unique
+  zkLoginMaxEpoch Int?
   zkLoginProofInputsJson String?
   expiresAt      DateTime
   createdAt      DateTime     @default(now())
@@ -160,8 +161,6 @@ model RegisteredProgram {
   chainFamily          String
   network              String
   packageId            String
-  appStateObjectId     String
-  authorityCapObjectId String
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
   app                  App      @relation(fields: [appId], references: [id], onDelete: Cascade)
@@ -213,8 +212,9 @@ model PendingActionReservation {
   chainId          String
   actionType       String
   status           String
-  username         String
-  message          String
+  metadataJson     String?
+  username         String?
+  message          String?
   creditsReserved  Int
   transactionBytes String
   sponsorSignature String
@@ -253,8 +253,9 @@ model TransactionRecord {
   walletAddress  String
   chainId        String
   actionType     String
-  username       String
-  message        String
+  metadataJson   String?
+  username       String?
+  message        String?
   digest         String
   explorerUrl    String
   status         String

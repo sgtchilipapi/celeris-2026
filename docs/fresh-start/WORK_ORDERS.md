@@ -27,7 +27,7 @@ This document turns the implementation plan into ordered work orders that an age
 | `FS-02.1` | complete | Real Google OAuth And zkLogin Completion | Replace mock hosted auth with real Google OAuth, zkLogin identity derivation, and prover-backed session material | `FS-00`, `FS-01`, `FS-01.1`, `FS-02` |
 | `FS-03` | complete | Credits And Mock Checkout | Catalog, balance, checkout flow, persistent credit ledger | `FS-01`, `FS-01.1`, `FS-02`, `FS-02.1` |
 | `FS-04` | complete | Sponsored Say Hello And Feed | Move package finalization, reference tx builder, sponsor-sign flow, completion, app-wide feed | `FS-01`, `FS-01.1`, `FS-02`, `FS-02.1`, `FS-03` |
-| `FS-04.1` | planned | Generic Metered Sponsored Actions | Replace hard-coded `say_hello` action routes with generic action registry, sponsorship, and SDK execution | `FS-01`, `FS-03`, `FS-04` |
+| `FS-04.1` | complete | Generic Metered Sponsored Actions | Replace hard-coded `say_hello` action routes with generic action registry, sponsorship, and SDK execution | `FS-01`, `FS-03`, `FS-04` |
 | `FS-05` | complete | SDK Consumer Hardening And Walkthrough | Public SDK integration proof, walkthrough, regression suite, final polish | `FS-00`, `FS-01`, `FS-01.1`, `FS-02`, `FS-02.1`, `FS-03`, `FS-04`; should be revisited after `FS-04.1` |
 
 ## Dependency Map
@@ -544,7 +544,7 @@ Enable a user with credits to execute the reference sponsored `say_hello` action
 ### Status Clarification
 
 - `FS-04` is complete as implemented, but it hard-codes `say_hello` as the action route, SDK helper, transaction validator, and execution pipeline.
-- The clarified product target is a generic action registry where Celeris meters credits by developer-defined `actionType`, while the developer app supplies the transaction kind.
+- The clarified product target is a generic action registry where Celeris meters credits by developer-defined `actionType`, while the developer app supplies a Sui `Transaction` and the Celeris SDK serializes it for sponsorship.
 - `FS-04.1` is the required bridge work order to align the implementation with that target.
 
 ### In Scope
@@ -626,7 +626,8 @@ Bridge the gap between the current hard-coded `say_hello` implementation and the
 
 - actions are developer-defined credit-metered app actions
 - Celeris does not need to know the concrete blockchain function for each action
-- the developer app supplies the `TransactionKind`
+- the developer app supplies a Sui `Transaction`
+- the Celeris browser SDK serializes that transaction to transaction-kind bytes for the backend API
 - Celeris reserves/captures credits and sponsor-signs only when the action and transaction satisfy policy
 
 ### In Scope
@@ -671,7 +672,8 @@ Bridge the gap between the current hard-coded `say_hello` implementation and the
   - action type validation
   - action upsert input
   - action list response
-  - generic execute input `{ transactionKind, metadata? }`
+  - SDK execute input `{ transaction, metadata? }`
+  - API execute input `{ transactionKindBytes, metadata? }`
   - generic completion input
 - Replace the `say_hello`-only developer action route with:
   - `GET /v1/developer/apps/:appId/actions`
@@ -679,11 +681,11 @@ Bridge the gap between the current hard-coded `say_hello` implementation and the
 - Replace or wrap the `say_hello`-only app routes with:
   - `POST /v1/apps/:appId/actions/:actionType/execute`
   - `POST /v1/apps/:appId/actions/:actionType/complete`
-- On execute:
+- On API execute:
   - require a known app
   - require a registered enabled action
   - reserve the action's configured credit usage
-  - accept the developer-supplied transaction kind
+  - accept serialized transaction-kind bytes produced by the browser SDK
   - reject transactions outside the sponsorship policy
   - sponsor-sign and return the transaction bytes and sponsor signature
 - Sponsorship policy must at minimum bind sponsorship to:
@@ -692,9 +694,10 @@ Bridge the gap between the current hard-coded `say_hello` implementation and the
   - the app's registered Sui package or program metadata
   - transaction bounds that prevent unrelated sponsor-wallet spending
 - Update the browser SDK with:
-  - `client.actions.execute({ actionType, transactionKind, metadata? })`
+  - `client.actions.execute({ actionType, transaction, metadata? })`
   - `client.actions.sayHello({ username })` as a reference helper over generic execute
-- Update the reference demo so its `say_hello` transaction kind is supplied through the generic action API.
+- Use `@mysten/sui` inside the SDK to serialize the supplied `Transaction` to transaction-kind bytes for the API call.
+- Update the reference demo so its `say_hello` `Transaction` is supplied through the generic action SDK API.
 - Update the developer setup console card with ID `user-actions-configuration` so it can create, update, enable/disable, and list arbitrary action types.
 - Update catalog, balance/action display, transaction feed, and walkthrough docs for generic action terminology.
 
@@ -714,7 +717,8 @@ Bridge the gap between the current hard-coded `say_hello` implementation and the
 - each action has configurable credit usage and enabled state
 - app catalog returns configured action pricing generically
 - execute rejects unknown, disabled, or insufficient-credit action requests
-- execute accepts a developer-supplied transaction kind for a registered action
+- SDK execute accepts a developer-supplied Sui `Transaction` for a registered action
+- API execute accepts transaction-kind bytes serialized by the SDK
 - execute rejects transaction kinds outside the app sponsorship policy
 - completion captures or releases credits for arbitrary action types
 - transaction feed records and returns the generic action type and metadata

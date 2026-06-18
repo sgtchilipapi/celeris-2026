@@ -1,7 +1,9 @@
 import {
   CELERIS_AUTH_CLIENT_KIND_APP_CONSUMER,
+  CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
   appBalanceResponseSchema,
   appCatalogResponseSchema,
+  actionSponsorshipResponseSchema,
   authLoginRequestResponseSchema,
   authSessionResponseSchema,
   appTransactionsResponseSchema,
@@ -9,7 +11,6 @@ import {
   checkoutSessionResponseSchema,
   completeSayHelloResponseSchema,
   completeCheckoutSessionResponseSchema,
-  sayHelloSponsorshipResponseSchema,
   type AppBalance,
   type AppCatalog,
   type AppTransactionRecord,
@@ -17,9 +18,10 @@ import {
   type AuthSession,
   type CheckoutSession
 } from "@celeris/shared";
-import { fromBase64 } from "@mysten/bcs";
+import { fromBase64, toBase64 } from "@mysten/bcs";
 import { SuiClient } from "@mysten/sui/client";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { TransactionDataBuilder, type Transaction } from "@mysten/sui/transactions";
 import { generateNonce, generateRandomness, getExtendedEphemeralPublicKey, getZkLoginSignature } from "@mysten/sui/zklogin";
 
 export interface CelerisBrowserClientConfig {
@@ -40,6 +42,16 @@ export interface StartCheckoutOptions {
   successRedirectUrl?: string;
   cancelRedirectUrl?: string;
 }
+
+export interface ExecuteActionOptions {
+  actionType: string;
+  transaction: Transaction;
+  metadata?: Record<string, unknown>;
+}
+
+type InternalExecuteActionOptions = ExecuteActionOptions & {
+  sessionOverride?: AuthSession;
+};
 
 export class CelerisBrowserSdkError extends Error {
   constructor(
@@ -120,6 +132,47 @@ function createRandomToken(byteLength = 32) {
 
   globalThis.crypto.getRandomValues(bytes);
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function serializeTransactionKindBytes(transaction: Transaction, suiRpcOrigin?: string) {
+  if (suiRpcOrigin) {
+    const client = new SuiClient({ url: suiRpcOrigin });
+    return toBase64(await transaction.build({ client, onlyTransactionKind: true }));
+  }
+
+  try {
+    return toBase64(TransactionDataBuilder.restore(transaction.getData() as never).build({ onlyTransactionKind: true }));
+  } catch {
+    return toBase64(new TextEncoder().encode(JSON.stringify(transaction.getData())));
+  }
+}
+
+function assertSignatureReadyZkLoginProofInputs(proofInputs: Record<string, unknown>) {
+  const missingFields: string[] = [];
+  const proofPoints = proofInputs.proofPoints as Record<string, unknown> | undefined;
+  const issBase64Details = proofInputs.issBase64Details as Record<string, unknown> | undefined;
+
+  if (!proofPoints || !Array.isArray(proofPoints.a) || !Array.isArray(proofPoints.b) || !Array.isArray(proofPoints.c)) {
+    missingFields.push("proofPoints");
+  }
+
+  if (!issBase64Details || typeof issBase64Details.value !== "string" || typeof issBase64Details.indexMod4 !== "number") {
+    missingFields.push("issBase64Details");
+  }
+
+  if (typeof proofInputs.headerBase64 !== "string") {
+    missingFields.push("headerBase64");
+  }
+
+  if (typeof proofInputs.addressSeed !== "string") {
+    missingFields.push("addressSeed");
+  }
+
+  if (missingFields.length > 0) {
+    throw new CelerisTransactionVerificationError(
+      `Celeris zkLogin proof inputs are missing required field(s): ${missingFields.join(", ")}`
+    );
+  }
 }
 
 async function resolveMaxEpoch(suiRpcOrigin?: string) {
@@ -265,6 +318,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
       throw new CelerisTransactionVerificationError("Celeris zkLogin session material is required to submit sponsored transactions");
     }
 
+    assertSignatureReadyZkLoginProofInputs(session.zkLogin.proofInputs);
     const ephemeralKeypair = Ed25519Keypair.fromSecretKey(readEphemeralSecretKey());
     const { signature: userSignature } = await ephemeralKeypair.signTransaction(fromBase64(transactionBytes));
     const zkLoginSignature = getZkLoginSignature({
@@ -374,7 +428,22 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
         }
 
         const payload = authSessionResponseSchema.parse(await response.json());
-        return storeSession(payload.session);
+        const refreshedSession = payload.session;
+        const mergedSession: AuthSession =
+          parsed.zkLogin && refreshedSession.zkLogin
+            ? {
+                ...refreshedSession,
+                zkLogin: {
+                  nonce: refreshedSession.zkLogin.nonce ?? parsed.zkLogin.nonce,
+                  extendedEphemeralPublicKey:
+                    refreshedSession.zkLogin.extendedEphemeralPublicKey ?? parsed.zkLogin.extendedEphemeralPublicKey,
+                  maxEpoch: refreshedSession.zkLogin.maxEpoch ?? parsed.zkLogin.maxEpoch,
+                  proofInputs: refreshedSession.zkLogin.proofInputs ?? parsed.zkLogin.proofInputs
+                }
+              }
+            : refreshedSession;
+
+        return storeSession(mergedSession);
       },
       signOut: async (): Promise<void> => {
         const parsed = readStoredSession();
@@ -446,36 +515,27 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
       }
     },
     actions: {
-      sayHello: async (input: { username: string }): Promise<{
+      execute: async (input: InternalExecuteActionOptions): Promise<{
         reservationId: string;
         digest: string;
-        message: string;
         balance: AppBalance;
         transaction: AppTransactionRecord | null;
+        metadata: Record<string, unknown> | null;
       }> => {
-        const session = await requireStoredSession();
-        const catalog = await client.apps.getCatalog();
-
-        if (!catalog.registeredProgram) {
-          throw new CelerisSponsorshipError("Celeris app is missing registered Sui program metadata");
-        }
-
-        const { transactionKind } = buildHelloCelerisSayHelloTransaction({
-          packageId: catalog.registeredProgram.packageId,
-          appAuthorityCapObjectId: catalog.registeredProgram.authorityCapObjectId,
-          appStateObjectId: catalog.registeredProgram.appStateObjectId,
-          username: input.username
-        });
+        const session = input.sessionOverride ?? (await requireStoredSession());
+        const transactionKind = input.transaction.getData();
+        const transactionKindBytes = await serializeTransactionKindBytes(input.transaction, config.suiRpcOrigin);
         const execution = await requestAuthenticatedJson(
-          new URL(`/v1/apps/${config.appId}/actions/say_hello/execute`, config.apiOrigin),
+          new URL(`/v1/apps/${config.appId}/actions/${encodeURIComponent(input.actionType)}/execute`, config.apiOrigin),
           {
             method: "POST",
             body: JSON.stringify({
-              username: input.username,
-              transactionKind
+              transactionKindBytes,
+              transactionKind,
+              metadata: input.metadata
             })
           },
-          sayHelloSponsorshipResponseSchema,
+          actionSponsorshipResponseSchema,
           "sponsorship"
         );
 
@@ -486,7 +546,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
             execution.sponsorship.sponsorSignature
           );
           const completion = await requestAuthenticatedJson(
-            new URL(`/v1/apps/${config.appId}/actions/say_hello/complete`, config.apiOrigin),
+            new URL(`/v1/apps/${config.appId}/actions/${encodeURIComponent(input.actionType)}/complete`, config.apiOrigin),
             {
               method: "POST",
               body: JSON.stringify({
@@ -502,13 +562,13 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
           return {
             reservationId: execution.sponsorship.reservationId,
             digest: submitted.digest,
-            message: execution.sponsorship.message,
             balance: completion.balance,
-            transaction: completion.transaction
+            transaction: completion.transaction,
+            metadata: execution.sponsorship.metadata
           };
         } catch (error) {
           await requestAuthenticatedJson(
-            new URL(`/v1/apps/${config.appId}/actions/say_hello/complete`, config.apiOrigin),
+            new URL(`/v1/apps/${config.appId}/actions/${encodeURIComponent(input.actionType)}/complete`, config.apiOrigin),
             {
               method: "POST",
               body: JSON.stringify({
@@ -521,6 +581,40 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
           ).catch(() => null);
           throw error;
         }
+      },
+      sayHello: async (input: { appStateObjectId: string; username: string }): Promise<{
+        reservationId: string;
+        digest: string;
+        message: string;
+        balance: AppBalance;
+        transaction: AppTransactionRecord | null;
+      }> => {
+        const session = await requireStoredSession();
+        const catalog = await client.apps.getCatalog();
+
+        if (!catalog.registeredProgram) {
+          throw new CelerisSponsorshipError("Celeris app is missing registered Sui program metadata");
+        }
+
+        const built = buildHelloCelerisSayHelloTransaction({
+          packageId: catalog.registeredProgram.packageId,
+          appStateObjectId: input.appStateObjectId,
+          username: input.username
+        });
+        const result = await client.actions.execute({
+          actionType: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
+          transaction: built.transaction,
+          sessionOverride: session,
+          metadata: {
+            username: built.normalizedUsername,
+            message: built.message
+          }
+        });
+
+        return {
+          ...result,
+          message: typeof result.metadata?.message === "string" ? result.metadata.message : built.message
+        };
       }
     },
     transactions: {

@@ -4,10 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import {
   CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
-  type ConfigureSayHelloInput,
+  type ConfigureManagedActionInput,
   type ConfigureCreditsPricingInput,
   configureCreditsPricingSchema,
-  configureSayHelloSchema,
+  configureManagedActionSchema,
   type CreateDeveloperAppInput,
   createDeveloperAppSchema,
   creditsPricingResponseSchema,
@@ -37,8 +37,6 @@ interface DeveloperSetupConsoleProps {
 
 interface ProgramFormState {
   packageId: string;
-  appStateObjectId: string;
-  authorityCapObjectId: string;
 }
 
 interface ActionFormState {
@@ -110,9 +108,7 @@ export function DeveloperSetupConsole({
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
   const [newAppName, setNewAppName] = useState("");
   const [programForm, setProgramForm] = useState<ProgramFormState>({
-    packageId: "",
-    appStateObjectId: "",
-    authorityCapObjectId: ""
+    packageId: ""
   });
   const [actionForm, setActionForm] = useState<ActionFormState>({
     actionName: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
@@ -130,6 +126,17 @@ export function DeveloperSetupConsole({
     () => apps.find((app) => app.appId === selectedAppId) ?? null,
     [apps, selectedAppId]
   );
+  const configuredActions = useMemo(() => {
+    if (!selectedApp) {
+      return [];
+    }
+
+    return selectedApp.actions.length > 0
+      ? selectedApp.actions
+      : selectedApp.sayHelloAction
+        ? [selectedApp.sayHelloAction]
+        : [];
+  }, [selectedApp]);
 
   useEffect(() => {
     const storedToken =
@@ -156,9 +163,7 @@ export function DeveloperSetupConsole({
     }
 
     setProgramForm({
-      packageId: selectedApp.registeredProgram?.packageId ?? "",
-      appStateObjectId: selectedApp.registeredProgram?.appStateObjectId ?? "",
-      authorityCapObjectId: selectedApp.registeredProgram?.authorityCapObjectId ?? ""
+      packageId: selectedApp.registeredProgram?.packageId ?? ""
     });
     setActionForm({
       actionName: selectedApp.sayHelloAction?.actionType ?? CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
@@ -397,16 +402,13 @@ export function DeveloperSetupConsole({
     setErrorMessage(null);
 
     try {
-      if (actionForm.actionName.trim() !== CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO) {
-        throw new Error("Only say_hello is supported for this MVP app.");
-      }
-
-      const payload: ConfigureSayHelloInput = configureSayHelloSchema.parse({
+      const actionType = actionForm.actionName.trim();
+      const payload: ConfigureManagedActionInput = configureManagedActionSchema.parse({
         priceCredits: Number(actionForm.priceCredits),
         isEnabled: actionForm.isEnabled
       });
       await request(
-        `/v1/developer/apps/${selectedApp.appId}/actions/say_hello`,
+        `/v1/developer/apps/${selectedApp.appId}/actions/${encodeURIComponent(actionType)}`,
         {
           method: "PUT",
           body: JSON.stringify(payload)
@@ -414,7 +416,7 @@ export function DeveloperSetupConsole({
         managedActionResponseSchema
       );
       await refreshApp(selectedApp.appId);
-      setStatusMessage("Updated say_hello action.");
+      setStatusMessage(`Updated ${actionType} action.`);
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     } finally {
@@ -616,30 +618,14 @@ export function DeveloperSetupConsole({
                   <form className="grid gap-3" onSubmit={handleRegisterProgram}>
                     <div>
                       <h3 className="text-base font-semibold">Deployed Sui package</h3>
-                      <p className="mt-1 text-sm text-[#55635d]">Register the package and object IDs.</p>
+                      <p className="mt-1 text-sm text-[#55635d]">Register the package used by sponsored actions.</p>
                     </div>
                     <Label>
                       <span>Package ID</span>
                       <Input onChange={updateProgramField("packageId")} type="text" value={programForm.packageId} />
                     </Label>
-                    <Label>
-                      <span>AppState object ID</span>
-                      <Input
-                        onChange={updateProgramField("appStateObjectId")}
-                        type="text"
-                        value={programForm.appStateObjectId}
-                      />
-                    </Label>
-                    <Label>
-                      <span>Authority capability object ID</span>
-                      <Input
-                        onChange={updateProgramField("authorityCapObjectId")}
-                        type="text"
-                        value={programForm.authorityCapObjectId}
-                      />
-                    </Label>
                     <Button className="justify-self-start" disabled={isBusy} type="submit">
-                      Save program IDs
+                      Save package ID
                     </Button>
                   </form>
 
@@ -723,14 +709,16 @@ export function DeveloperSetupConsole({
                 </div>
                 <div className="grid gap-3">
                   <h3 className="text-base font-semibold">Configured actions</h3>
-                  {selectedApp.sayHelloAction ? (
-                    <div className="list-row rounded-md" role="listitem">
-                      <div>
-                        <span>{selectedApp.sayHelloAction.actionType}</span>
-                        <small>{selectedApp.sayHelloAction.priceCredits} credits per use</small>
+                  {configuredActions.length > 0 ? (
+                    configuredActions.map((action) => (
+                      <div className="list-row rounded-md" role="listitem" key={action.actionType}>
+                        <div>
+                          <span>{action.actionType}</span>
+                          <small>{action.priceCredits} credits per use</small>
+                        </div>
+                        <small>{action.isEnabled ? "Enabled" : "Disabled"}</small>
                       </div>
-                      <small>{selectedApp.sayHelloAction.isEnabled ? "Enabled" : "Disabled"}</small>
-                    </div>
+                    ))
                   ) : (
                     <p className="empty-state">No user actions configured yet.</p>
                   )}
