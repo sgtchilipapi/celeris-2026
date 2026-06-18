@@ -97,6 +97,7 @@ export function DemoConsumerShell({
   }, [client]);
 
   const sayHelloAction = catalog?.actions.find((action) => action.actionType === CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO) ?? null;
+  const enabledActions = catalog?.actions ?? [];
 
   async function handleAppConfig(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -291,6 +292,10 @@ export function DemoConsumerShell({
               <dt>Say hello price</dt>
               <dd>{sayHelloAction ? `${sayHelloAction.priceCredits} credits` : "Not configured"}</dd>
             </div>
+            <div>
+              <dt>Configured actions</dt>
+              <dd>{enabledActions.length > 0 ? enabledActions.map((action) => action.actionType).join(", ") : "None"}</dd>
+            </div>
           </dl>
           <form className="form-grid compact checkout-form" onSubmit={handleCheckout}>
             <Label>
@@ -345,7 +350,7 @@ export function DemoConsumerShell({
             {transactions.length > 0 ? (
               transactions.map((transaction) => (
                 <a className="list-row" href={transaction.explorerUrl} key={transaction.transactionId}>
-                  <strong>{transaction.message}</strong>
+                  <strong>{transaction.message ?? transaction.actionType}</strong>
                   <small>{transaction.digest}</small>
                   <small>{transaction.walletAddress}</small>
                 </a>

@@ -128,7 +128,7 @@ appStateObjectId=<AppState object ID>
 authorityCapObjectId=<AppAuthorityCap object ID>
 ```
 
-Then configure the `say_hello` action price, for example `5` credits, and leave it enabled.
+Then configure one or more metered actions in the dashboard. For the reference demo, create or update the `say_hello` action with a price such as `5` credits and leave it enabled.
 
 ## 9. Configure The Reference Demo App
 
@@ -138,7 +138,7 @@ Open the demo surface:
 http://localhost:3103
 ```
 
-Paste the Celeris app ID into the App ID field and save it. The reference frontend uses only the public browser SDK API described in [the Next.js SDK example](../examples/nextjs-sdk-consumer.md).
+Paste the Celeris app ID into the App ID field and save it. The reference frontend builds the `say_hello` Sui transaction, then uses the public browser SDK generic action execution API described in [the Next.js SDK example](../examples/nextjs-sdk-consumer.md).
 
 ## 10. User Sign-In, Purchase, And Execute
 

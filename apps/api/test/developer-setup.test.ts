@@ -7,6 +7,7 @@ import type { GoogleOAuthClient, SuiSponsorAdapter, VerifiedGoogleIdentity, ZkLo
 import { createDeveloperSetupService } from "../src/features/developer/service";
 import { unauthorized } from "../src/lib/http-error";
 import { buildHelloCelerisSayHelloTransaction } from "@celeris/shared";
+import { toBase64 } from "@mysten/bcs";
 
 const validPackageId = "0x2c45b9cf7d7c5fc33dbd0a1b5c14fffd7a74ac6f9ed6d7f2d881d7ec8e5a2011";
 const validAppStateObjectId = "0x6f5f67b135cb76aab0b0d3cf90a227ca31da93c1df2c0d0e42f7324de8f0fe21";
@@ -99,7 +100,7 @@ const mockZkLoginProver: ZkLoginProver = {
 };
 
 const mockSuiSponsorAdapter: SuiSponsorAdapter = {
-  async createSponsoredSayHello(input) {
+  async createSponsoredAction(input) {
     return {
       transactionBytes: "mock-transaction-bytes",
       sponsorSignature: "mock-sponsor-signature",
@@ -110,6 +111,14 @@ const mockSuiSponsorAdapter: SuiSponsorAdapter = {
         digest: "gas-digest"
       }
     };
+  },
+  async createSponsoredSayHello(input) {
+    return this.createSponsoredAction({
+      transactionKindBytes: "mock-transaction-kind-bytes",
+      userWalletAddress: input.userWalletAddress,
+      sponsorWallet: input.sponsorWallet,
+      encryptionKey: input.encryptionKey
+    });
   },
   async verifyTransaction(input) {
     if (input.digest === "bad-digest") {
@@ -535,8 +544,11 @@ describe("developer setup routes", () => {
       url: `/v1/apps/${appId}/actions/say_hello/execute`,
       token: consumerToken,
       body: {
-        username: "  Ada  ",
-        transactionKind
+        transactionKindBytes: toBase64(new TextEncoder().encode(JSON.stringify(transactionKind))),
+        transactionKind,
+        metadata: {
+          username: "  Ada  "
+        }
       }
     });
 
@@ -544,6 +556,11 @@ describe("developer setup routes", () => {
     expect(execute.json.sponsorship).toMatchObject({
       username: "Ada",
       message: "Ada says Hello Celeris!",
+      actionType: "say_hello",
+      metadata: {
+        username: "Ada",
+        message: "Ada says Hello Celeris!"
+      },
       transactionBytes: "mock-transaction-bytes",
       sponsorSignature: "mock-sponsor-signature"
     });
@@ -565,6 +582,11 @@ describe("developer setup routes", () => {
     expect(complete.json.balance.availableCredits).toBe(93);
     expect(complete.json.transaction).toMatchObject({
       digest: "digest_123",
+      actionType: "say_hello",
+      metadata: {
+        username: "Ada",
+        message: "Ada says Hello Celeris!"
+      },
       username: "Ada",
       message: "Ada says Hello Celeris!"
     });
@@ -714,6 +736,15 @@ describe("developer setup routes", () => {
       method: "GET",
       url: `/v1/auth/google/callback?code=runtime:${googleUrl.searchParams.get("nonce")}&state=${googleUrl.searchParams.get("state")}`
     });
+    const callbackUrl = new URL(googleCallback.redirectUrl);
+    const token = await requestJson(runtimeProverApp, {
+      method: "POST",
+      url: "/v1/auth/token",
+      body: {
+        code: callbackUrl.searchParams.get("code"),
+        state: callbackUrl.searchParams.get("state")
+      }
+    });
 
     expect(googleCallback.statusCode).toBe(302);
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -728,6 +759,7 @@ describe("developer setup routes", () => {
       keyClaimName: "sub"
     });
     expect(typeof sentProverRequestBody.salt).toBe("string");
+    expect(token.json.session.zkLogin.proofInputs.addressSeed).toEqual(expect.any(String));
   });
 
   it("repairs legacy oversized zkLogin salts before requesting a proof", async () => {

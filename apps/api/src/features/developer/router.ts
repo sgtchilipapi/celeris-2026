@@ -233,14 +233,27 @@ export function createDeveloperRouter(options?: DeveloperRouterOptions) {
     res.status(200).json({ registeredProgram });
   });
 
-  router.put("/v1/developer/apps/:appId/actions/say_hello", developerAuth, async (req, res) => {
+  router.get("/v1/developer/apps/:appId/actions", developerAuth, async (req, res) => {
     const developerProfile = res.locals.developerProfile as { id: string };
-    const sayHelloAction = await resolveService().configureSayHello(
+    const actions = await resolveService().listActions(
+      developerProfile.id,
+      requireRouteParam(req.params.appId, "appId")
+    );
+    res.status(200).json({ actions });
+  });
+
+  router.put("/v1/developer/apps/:appId/actions/:actionType", developerAuth, async (req, res) => {
+    const developerProfile = res.locals.developerProfile as { id: string };
+    const action = await resolveService().configureAction(
       developerProfile.id,
       requireRouteParam(req.params.appId, "appId"),
+      requireRouteParam(req.params.actionType, "actionType"),
       req.body
     );
-    res.status(200).json({ sayHelloAction });
+    res.status(200).json({
+      action,
+      ...(action.actionType === "say_hello" ? { sayHelloAction: action } : {})
+    });
   });
 
   router.put("/v1/developer/apps/:appId/credits-pricing", developerAuth, async (req, res) => {
@@ -292,32 +305,35 @@ export function createDeveloperRouter(options?: DeveloperRouterOptions) {
     res.status(200).json(result);
   });
 
-  router.post("/v1/apps/:appId/actions/say_hello/execute", userSession, async (req, res) => {
-    const result = await resolveService().executeSayHello(
+  router.post("/v1/apps/:appId/actions/:actionType/execute", userSession, async (req, res) => {
+    const result = await resolveService().executeAction(
       res.locals.userSession,
       requireRouteParam(req.params.appId, "appId"),
+      requireRouteParam(req.params.actionType, "actionType"),
       req.body
     );
-    logger.info("audit.say_hello.executed", {
+    logger.info("audit.action.executed", {
       requestId: res.locals.requestId,
       appId: req.params.appId,
+      actionType: req.params.actionType,
       reservationId: result.sponsorship.reservationId,
       walletAddress: result.balance.walletAddress,
-      username: result.sponsorship.username,
       sponsorAddress: result.sponsorship.sponsorAddress
     });
     res.status(201).json(result);
   });
 
-  router.post("/v1/apps/:appId/actions/say_hello/complete", userSession, async (req, res) => {
-    const result = await resolveService().completeSayHello(
+  router.post("/v1/apps/:appId/actions/:actionType/complete", userSession, async (req, res) => {
+    const result = await resolveService().completeAction(
       res.locals.userSession,
       requireRouteParam(req.params.appId, "appId"),
+      requireRouteParam(req.params.actionType, "actionType"),
       req.body
     );
-    logger.info("audit.say_hello.completed", {
+    logger.info("audit.action.completed", {
       requestId: res.locals.requestId,
       appId: req.params.appId,
+      actionType: req.params.actionType,
       reservationId: result.reservationId,
       status: result.status,
       digest: result.transaction?.digest,

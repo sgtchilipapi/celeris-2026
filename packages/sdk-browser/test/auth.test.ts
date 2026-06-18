@@ -447,8 +447,11 @@ describe("Celeris browser SDK auth", () => {
               sponsorSignature: "sponsor-signature",
               sponsorAddress: createSession().user.walletAddress,
               expiresAt: "2026-06-30T00:00:00.000Z",
-              username: "Ada",
-              message: "Ada says Hello Celeris!"
+              actionType: "say_hello",
+              metadata: {
+                username: "Ada",
+                message: "Ada says Hello Celeris!"
+              }
             },
             balance: {
               appId: "app_123",
@@ -478,6 +481,10 @@ describe("Celeris browser SDK auth", () => {
               actionType: "say_hello",
               walletAddress: createSession().user.walletAddress,
               chainId: "sui:testnet",
+              metadata: {
+                username: "Ada",
+                message: "Ada says Hello Celeris!"
+              },
               username: "Ada",
               message: "Ada says Hello Celeris!",
               digest: "local-digest",
@@ -506,10 +513,17 @@ describe("Celeris browser SDK auth", () => {
       }
     });
 
-    const executeBody = JSON.parse(fetchMock.mock.calls[3]?.[1]?.body as string) as Record<string, unknown>;
+    const executeCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes("/v1/apps/app_123/actions/say_hello/execute")
+    );
+    const executeBody = JSON.parse(executeCall?.[1]?.body as string) as Record<string, unknown>;
     expect(executeBody).toMatchObject({
-      username: "Ada",
-      transactionKind: expect.any(Object)
+      transactionKindBytes: expect.any(String),
+      transactionKind: expect.any(Object),
+      metadata: {
+        username: "Ada",
+        message: "Ada says Hello Celeris!"
+      }
     });
   });
 
@@ -618,4 +632,5 @@ describe("Celeris browser SDK auth", () => {
 
     await expect(client.actions.sayHello({ username: "Ada" })).rejects.toBeInstanceOf(CelerisSponsorshipError);
   });
+
 });

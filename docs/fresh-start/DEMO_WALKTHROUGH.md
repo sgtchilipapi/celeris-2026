@@ -24,7 +24,7 @@ appStateObjectId=<AppState object ID>
 authorityCapObjectId=<AppAuthorityCap object ID>
 ```
 
-3. Then configure the `say_hello` action price, for example `5` credits, and leave it enabled.
+3. Then configure metered app actions. For the reference demo, create or update `say_hello`, set a price such as `5` credits, and leave it enabled.
 
 ## 3. Configure the Demo App
 

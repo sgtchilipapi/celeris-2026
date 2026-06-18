@@ -48,4 +48,6 @@ export async function sayHello(username: string) {
 }
 ```
 
+For custom actions, build a Sui `Transaction` in the app and call `celeris.actions.execute({ actionType, transaction, metadata })`. Celeris meters by the registered `actionType`; the SDK serializes the transaction-kind bytes for sponsorship.
+
 The SDK stores bearer sessions and zkLogin ephemeral material in `sessionStorage`. Do not mirror these values into `localStorage`.
