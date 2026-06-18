@@ -145,16 +145,12 @@ export const registeredProgramSchema = z.object({
   chainFamily: z.literal(CELERIS_CHAIN_FAMILY_SUI),
   network: z.literal(CELERIS_NETWORK_TESTNET),
   packageId: suiPackageIdSchema,
-  appStateObjectId: suiObjectIdSchema,
-  authorityCapObjectId: suiObjectIdSchema,
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()
 });
 
 export const registerProgramSchema = z.object({
-  packageId: suiPackageIdSchema,
-  appStateObjectId: suiObjectIdSchema,
-  authorityCapObjectId: suiObjectIdSchema
+  packageId: suiPackageIdSchema
 });
 
 export const managedActionTypeSchema = z
@@ -401,13 +397,11 @@ export function deriveZkLoginWalletAddress(input: { issuer: string; subject: str
 
 export function buildSayHelloTransactionKindForApi(input: {
   packageId: string;
-  authorityCapObjectId: string;
   appStateObjectId: string;
   username: string;
 }) {
   return buildHelloCelerisSayHelloTransaction({
     packageId: input.packageId,
-    appAuthorityCapObjectId: input.authorityCapObjectId,
     appStateObjectId: input.appStateObjectId,
     username: input.username
   }).transactionKind;

@@ -94,8 +94,6 @@ export interface RegisteredProgramRecord {
   chainFamily: string;
   network: string;
   packageId: string;
-  appStateObjectId: string;
-  authorityCapObjectId: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -261,8 +259,6 @@ export interface UpsertSponsorWalletInput {
 export interface UpsertRegisteredProgramInput {
   appId: string;
   packageId: string;
-  appStateObjectId: string;
-  authorityCapObjectId: string;
 }
 
 export interface UpsertManagedActionInput {
@@ -661,17 +657,13 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
           }
         },
         update: {
-          packageId: input.packageId,
-          appStateObjectId: input.appStateObjectId,
-          authorityCapObjectId: input.authorityCapObjectId
+          packageId: input.packageId
         },
         create: {
           appId: input.appId,
           chainFamily: CELERIS_CHAIN_FAMILY_SUI,
           network: CELERIS_NETWORK_TESTNET,
-          packageId: input.packageId,
-          appStateObjectId: input.appStateObjectId,
-          authorityCapObjectId: input.authorityCapObjectId
+          packageId: input.packageId
         }
       });
     },
@@ -1281,8 +1273,6 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
         chainFamily: CELERIS_CHAIN_FAMILY_SUI,
         network: CELERIS_NETWORK_TESTNET,
         packageId: input.packageId,
-        appStateObjectId: input.appStateObjectId,
-        authorityCapObjectId: input.authorityCapObjectId,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now
       };

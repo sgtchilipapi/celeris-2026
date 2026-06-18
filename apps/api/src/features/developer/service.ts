@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { fromBase64, toBase64 } from "@mysten/bcs";
 import { SuiClient } from "@mysten/sui/client";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
-import { Transaction, TransactionDataBuilder } from "@mysten/sui/transactions";
+import { Transaction } from "@mysten/sui/transactions";
 import { genAddressSeed } from "@mysten/sui/zklogin";
 import { z } from "zod";
 import {
@@ -36,8 +36,6 @@ import {
   type ExecuteManagedActionInput,
   executeManagedActionSchema,
   executeSayHelloSchema,
-  assertHelloCelerisTransactionKindValueMatches,
-  buildCanonicalHelloCelerisSayHelloTransaction,
   managedActionTypeSchema,
   normalizeHelloCelerisUsername,
   renderHelloCelerisMessage,
@@ -117,12 +115,6 @@ export interface SuiSponsorAdapter {
     sponsorWallet: SponsorWalletRecord;
     encryptionKey: string;
   }): Promise<SponsoredTransactionPayload>;
-  createSponsoredSayHello?(input: {
-    transaction: ReturnType<typeof buildCanonicalHelloCelerisSayHelloTransaction>["transaction"];
-    userWalletAddress: string;
-    sponsorWallet: SponsorWalletRecord;
-    encryptionKey: string;
-  }): Promise<SponsoredTransactionPayload>;
   verifyTransaction(input: { digest: string; expectedSender: string }): Promise<{ confirmedAt: Date }>;
 }
 
@@ -190,8 +182,6 @@ function toRegisteredProgram(record: RegisteredProgramRecord) {
     chainFamily: CELERIS_CHAIN_FAMILY_SUI,
     network: CELERIS_NETWORK_TESTNET,
     packageId: record.packageId,
-    appStateObjectId: record.appStateObjectId,
-    authorityCapObjectId: record.authorityCapObjectId,
     createdAt: toIsoString(record.createdAt),
     updatedAt: toIsoString(record.updatedAt)
   };
@@ -346,61 +336,40 @@ class RuntimeSuiSponsorAdapter implements SuiSponsorAdapter {
   }) {
     const keypair = Ed25519Keypair.fromSecretKey(decryptSecret(input.sponsorWallet.encryptedSecret, input.encryptionKey));
     const sponsorAddress = keypair.toSuiAddress();
-    const coins = await this.client.getCoins({
-      owner: sponsorAddress,
-      coinType: "0x2::sui::SUI",
-      limit: 1
-    });
-    const gasCoin = coins.data[0];
-
-    if (!gasCoin) {
-      throw badGateway("Sponsor wallet has no SUI gas coins");
-    }
-
     const transaction = Transaction.fromKind(fromBase64(input.transactionKindBytes));
     transaction.setSender(input.userWalletAddress);
     transaction.setGasOwner(sponsorAddress);
     transaction.setGasBudget(DEFAULT_SUI_GAS_BUDGET);
-    transaction.setGasPayment([
-      {
-        objectId: gasCoin.coinObjectId,
-        version: gasCoin.version,
-        digest: gasCoin.digest
-      }
-    ]);
+    let bytes: Uint8Array;
+    let signature: string;
 
-    const bytes = await transaction.build({
-      client: this.client
-    });
-    const { signature } = await keypair.signTransaction(bytes);
+    try {
+      bytes = await transaction.build({
+        client: this.client
+      });
+      signature = (await keypair.signTransaction(bytes)).signature;
+    } catch (error) {
+      throw badGateway("Failed to build sponsored transaction", {
+        reason: error instanceof Error ? error.message : String(error)
+      });
+    }
+
+    const gasCoin = transaction.getData().gasData.payment?.[0];
+
+    if (!gasCoin) {
+      throw badGateway("Sponsor wallet has no SUI gas coins");
+    }
 
     return {
       transactionBytes: toBase64(bytes),
       sponsorSignature: signature,
       sponsorAddress,
       gasCoin: {
-        objectId: gasCoin.coinObjectId,
-        version: gasCoin.version,
+        objectId: gasCoin.objectId,
+        version: String(gasCoin.version),
         digest: gasCoin.digest
       }
     };
-  }
-
-  async createSponsoredSayHello(input: {
-    transaction: ReturnType<typeof buildCanonicalHelloCelerisSayHelloTransaction>["transaction"];
-    userWalletAddress: string;
-    sponsorWallet: SponsorWalletRecord;
-    encryptionKey: string;
-  }) {
-    const transactionKindBytes = toBase64(
-      TransactionDataBuilder.restore(input.transaction.getData() as never).build({ onlyTransactionKind: true })
-    );
-    return this.createSponsoredAction({
-      transactionKindBytes,
-      userWalletAddress: input.userWalletAddress,
-      sponsorWallet: input.sponsorWallet,
-      encryptionKey: input.encryptionKey
-    });
   }
 
   async verifyTransaction(input: { digest: string; expectedSender: string }) {
@@ -1003,9 +972,7 @@ export class DeveloperSetupService {
     const payload = registerProgramSchema.parse(input);
     const program = await this.repository.upsertRegisteredProgram({
       appId,
-      packageId: payload.packageId,
-      appStateObjectId: payload.appStateObjectId,
-      authorityCapObjectId: payload.authorityCapObjectId
+      packageId: payload.packageId
     });
 
     return toRegisteredProgram(program);
@@ -1169,28 +1136,6 @@ export class DeveloperSetupService {
 
     const metadata = this.normalizeActionMetadata(actionType, payload.metadata ?? null);
     this.assertTransactionKindBytesWithinRegisteredProgram(payload.transactionKindBytes, app.registeredProgram);
-
-    if (actionType === CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO) {
-      const username = typeof metadata?.username === "string" ? metadata.username : "";
-      const built = buildCanonicalHelloCelerisSayHelloTransaction({
-        registeredProgram: app.registeredProgram,
-        userWalletAddress: appConsumer.walletAddress,
-        username
-      });
-
-      if (payload.transactionKind) {
-        try {
-          assertHelloCelerisTransactionKindValueMatches(payload.transactionKind, {
-            packageId: app.registeredProgram.packageId,
-            appAuthorityCapObjectId: app.registeredProgram.authorityCapObjectId,
-            appStateObjectId: app.registeredProgram.appStateObjectId,
-            username: built.normalizedUsername
-          });
-        } catch (error) {
-          throw badRequest(error instanceof Error ? error.message : "Invalid transaction kind");
-        }
-      }
-    }
 
     const sponsored = await this.suiSponsorAdapter.createSponsoredAction({
       transactionKindBytes: payload.transactionKindBytes,
@@ -1512,10 +1457,8 @@ export class DeveloperSetupService {
 
     const serialized = JSON.stringify(transactionData).toLowerCase();
     const packageId = registeredProgram.packageId.toLowerCase();
-    const appStateObjectId = registeredProgram.appStateObjectId.toLowerCase();
-    const authorityCapObjectId = registeredProgram.authorityCapObjectId.toLowerCase();
 
-    if (!serialized.includes(packageId) || (!serialized.includes(appStateObjectId) && !serialized.includes(authorityCapObjectId))) {
+    if (!serialized.includes(packageId)) {
       throw badRequest("Transaction kind is outside the app sponsorship policy");
     }
   }

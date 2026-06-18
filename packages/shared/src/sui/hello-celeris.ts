@@ -17,7 +17,6 @@ export const HELLO_CELERIS_CLOCK_OBJECT_ID = normalizeSuiObjectId(SUI_CLOCK_OBJE
 
 export interface HelloCelerisSayHelloTransactionParams {
   packageId: string;
-  appAuthorityCapObjectId: string;
   appStateObjectId: string;
   username: string;
   clockObjectId?: string;
@@ -25,12 +24,11 @@ export interface HelloCelerisSayHelloTransactionParams {
 
 export interface HelloCelerisRegisteredProgramLike {
   packageId: string;
-  authorityCapObjectId: string;
-  appStateObjectId: string;
 }
 
 export interface CanonicalHelloCelerisSayHelloTransactionParams {
   registeredProgram: HelloCelerisRegisteredProgramLike;
+  appStateObjectId: string;
   userWalletAddress: string;
   username: string;
   clockObjectId?: string;
@@ -91,10 +89,6 @@ export function renderHelloCelerisMessage(username: string) {
 
 export function buildHelloCelerisSayHelloTransaction(params: HelloCelerisSayHelloTransactionParams) {
   const packageId = parseSuiPackageId(params.packageId);
-  const appAuthorityCapObjectId = parseSuiObjectId(
-    params.appAuthorityCapObjectId,
-    "Sui Hello Celeris authority capability object ID"
-  );
   const appStateObjectId = parseSuiObjectId(
     params.appStateObjectId,
     "Sui Hello Celeris app state object ID"
@@ -109,7 +103,6 @@ export function buildHelloCelerisSayHelloTransaction(params: HelloCelerisSayHell
   transaction.moveCall({
     target: `${packageId}::${HELLO_CELERIS_MODULE_NAME}::${HELLO_CELERIS_SAY_HELLO_FUNCTION}`,
     arguments: [
-      transaction.object(appAuthorityCapObjectId),
       transaction.object(appStateObjectId),
       transaction.object(clockObjectId),
       transaction.pure.string(normalizedUsername)
@@ -118,7 +111,6 @@ export function buildHelloCelerisSayHelloTransaction(params: HelloCelerisSayHell
 
   return {
     packageId,
-    appAuthorityCapObjectId,
     appStateObjectId,
     clockObjectId,
     normalizedUsername,
@@ -132,8 +124,7 @@ export function buildCanonicalHelloCelerisSayHelloTransaction(params: CanonicalH
   const userWalletAddress = parseSuiAddress(params.userWalletAddress);
   const built = buildHelloCelerisSayHelloTransaction({
     packageId: params.registeredProgram.packageId,
-    appAuthorityCapObjectId: params.registeredProgram.authorityCapObjectId,
-    appStateObjectId: params.registeredProgram.appStateObjectId,
+    appStateObjectId: params.appStateObjectId,
     username: params.username,
     clockObjectId: params.clockObjectId
   });

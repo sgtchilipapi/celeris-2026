@@ -23,6 +23,7 @@ interface DemoConsumerShellProps {
   demoFrontendOrigin: string;
   suiRpcOrigin: string;
   initialAppId?: string;
+  initialAppStateObjectId?: string;
 }
 
 function toErrorMessage(error: unknown) {
@@ -34,7 +35,8 @@ export function DemoConsumerShell({
   hostedAuthOrigin,
   demoFrontendOrigin,
   suiRpcOrigin,
-  initialAppId = ""
+  initialAppId = "",
+  initialAppStateObjectId = ""
 }: DemoConsumerShellProps) {
   const [appId, setAppId] = useState(initialAppId);
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -183,11 +185,16 @@ export function DemoConsumerShell({
       return;
     }
 
+    if (!initialAppStateObjectId.trim()) {
+      setErrorMessage("HELLO_CELERIS_APP_STATE_OBJECT_ID is required in .env.demo.");
+      return;
+    }
+
     setIsBusy(true);
     setErrorMessage(null);
 
     try {
-      const result = await client.actions.sayHello({ username });
+      const result = await client.actions.sayHello({ appStateObjectId: initialAppStateObjectId, username });
       setBalance(result.balance);
       setTransactions(await client.transactions.list());
       setStatusMessage(`Submitted ${result.message}`);
@@ -333,7 +340,7 @@ export function DemoConsumerShell({
                 value={username}
               />
             </Label>
-            <Button disabled={isBusy || !session || !sayHelloAction} type="submit">
+            <Button disabled={isBusy || !session || !sayHelloAction || !initialAppStateObjectId.trim()} type="submit">
               Say Hello Celeris
             </Button>
           </form>

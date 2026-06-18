@@ -43,8 +43,8 @@ export async function buyCredits(credits: number) {
   return celeris.credits.startCheckout({ credits });
 }
 
-export async function sayHello(username: string) {
-  return celeris.actions.sayHello({ username });
+export async function sayHello(username: string, appStateObjectId: string) {
+  return celeris.actions.sayHello({ appStateObjectId, username });
 }
 ```
 

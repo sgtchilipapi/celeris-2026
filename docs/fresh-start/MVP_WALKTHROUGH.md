@@ -105,18 +105,17 @@ Record the published `packageId`.
 
 ## 7. Run `initialize_app`
 
-Call the initializer with the Celeris app ID from the dashboard:
+Call the initializer to create a shared app state object:
 
 ```bash
 sui client call \
   --package <packageId> \
   --module hello_celeris \
   --function initialize_app \
-  --args <celeris-app-id> \
   --gas-budget 50000000
 ```
 
-Record the created shared `AppState` object ID and owned `AppAuthorityCap` object ID from the command output.
+Record the created shared `AppState` object ID from the command output.
 
 ## 8. Register Program Metadata
 
@@ -124,9 +123,9 @@ Back in the developer dashboard, register:
 
 ```text
 packageId=<packageId>
-appStateObjectId=<AppState object ID>
-authorityCapObjectId=<AppAuthorityCap object ID>
 ```
+
+Keep `appStateObjectId=<AppState object ID>` in the demo app's transaction-building config.
 
 Then configure one or more metered actions in the dashboard. For the reference demo, create or update the `say_hello` action with a price such as `5` credits and leave it enabled.
 

@@ -144,7 +144,7 @@ These additions do not change product scope. They exist so the runtime can persi
 - `SponsorWallet`
   - `id`, `appId`, `chainFamily`, `network`, `address`, `encryptedSecret`, timestamps
 - `RegisteredProgram`
-  - `id`, `appId`, `chainFamily`, `network`, `packageId`, `appStateObjectId`, `authorityCapObjectId`, timestamps
+  - `id`, `appId`, `chainFamily`, `network`, `packageId`, timestamps
 
 ### User auth and identity
 
@@ -229,7 +229,7 @@ Target API shape:
 - `client.credits.getBalance()`
 - `client.credits.startCheckout()`
 - `client.actions.execute({ actionType, transaction, metadata? })`
-- optional reference helper: `client.actions.sayHello({ username })`
+- optional reference helper: `client.actions.sayHello({ appStateObjectId, username })`
 - `client.transactions.list()`
 
 The SDK must own:
@@ -329,7 +329,7 @@ A developer can create a new app, provision its sponsor wallet, register Sui pro
 - Allow a developer to:
   - create an app
   - provision a sponsor wallet
-  - enter `packageId`, `appStateObjectId`, and `authorityCapObjectId`
+  - enter `packageId`
   - configure action credit usage and enabled state
 - Add a simple frontend app config module that uses:
   - `appId`
@@ -641,7 +641,7 @@ The reference demo still uses `say_hello`, but `say_hello` should be one configu
 - Add generic browser SDK execution:
   - `client.actions.execute({ actionType, transaction, metadata? })`
 - The SDK should use `@mysten/sui` to build transaction-kind bytes from the supplied `Transaction` for the API call.
-- Keep `client.actions.sayHello({ username })` only as a reference helper layered on top of the generic execute method.
+- Keep `client.actions.sayHello({ appStateObjectId, username })` only as a reference helper layered on top of the generic execute method.
 - Ensure the reference app builds the `say_hello` `Transaction` outside the backend-special action path.
 
 ### Next.js work

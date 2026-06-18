@@ -43,12 +43,10 @@ The MVP must prove this full story end to end:
 
 ## On-Chain Contract
 
-- The Move package exposes `initialize_app(app_id)` and `say_hello(authority_cap, app_state, clock, username)`.
+- The Move package exposes `initialize_app()` and `say_hello(app_state, clock, username)`.
 - `initialize_app` creates:
   - one shared `AppState`
-  - one owned `AppAuthorityCap`
 - `AppState` stores:
-  - raw `appId`
   - `entryCount`
   - `entries`
 - Each greeting entry stores:
@@ -106,11 +104,11 @@ Managed actions are an app-level credit-metering registry, not a registry of blo
 8. Call `initialize_app` manually and record:
    - `packageId`
    - `appStateObjectId`
-   - `authorityCapObjectId`
-9. Register those Sui IDs against the app through the developer API.
-10. Register the app's user actions and configure each action's credit usage and enabled state.
-11. Consume the Celeris browser SDK in the frontend app and configure it with the app's public runtime values.
-12. Launch the reference demo consumer app on the demo origin.
+9. Register the package ID against the app through the developer API.
+10. Configure the demo app with the app state object ID needed to build the reference transaction.
+11. Register the app's user actions and configure each action's credit usage and enabled state.
+12. Consume the Celeris browser SDK in the frontend app and configure it with the app's public runtime values.
+13. Launch the reference demo consumer app on the demo origin.
 
 Unauthenticated developer visits to the app origin should redirect to the auth origin for sign-in.
 
@@ -151,7 +149,7 @@ The repo should fail closed when required auth, session, prover, or RPC env valu
 - `App`
   - `appId`, `developerProfileId`, `name`, `allowedChainId`, `authProvider`, timestamps
 - `RegisteredProgram`
-  - `appId`, `chainFamily`, `network`, `packageId`, `appStateObjectId`, `authorityCapObjectId`, timestamps
+  - `appId`, `chainFamily`, `network`, `packageId`, timestamps
 - `SponsorWallet`
   - `appId`, `chainFamily`, `network`, `address`, timestamps
 - `SponsorWalletSecret`

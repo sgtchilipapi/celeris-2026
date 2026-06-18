@@ -34,6 +34,7 @@ export default async function SurfaceRootPage() {
         demoFrontendOrigin={config.NEXT_PUBLIC_DEMO_FRONTEND_ORIGIN}
         suiRpcOrigin={config.NEXT_PUBLIC_SUI_RPC_ORIGIN}
         initialAppId={config.NEXT_PUBLIC_DEMO_APP_ID}
+        initialAppStateObjectId={process.env.HELLO_CELERIS_APP_STATE_OBJECT_ID ?? ""}
       />
     );
   }

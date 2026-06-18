@@ -582,7 +582,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
           throw error;
         }
       },
-      sayHello: async (input: { username: string }): Promise<{
+      sayHello: async (input: { appStateObjectId: string; username: string }): Promise<{
         reservationId: string;
         digest: string;
         message: string;
@@ -598,8 +598,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
 
         const built = buildHelloCelerisSayHelloTransaction({
           packageId: catalog.registeredProgram.packageId,
-          appAuthorityCapObjectId: catalog.registeredProgram.authorityCapObjectId,
-          appStateObjectId: catalog.registeredProgram.appStateObjectId,
+          appStateObjectId: input.appStateObjectId,
           username: input.username
         });
         const result = await client.actions.execute({

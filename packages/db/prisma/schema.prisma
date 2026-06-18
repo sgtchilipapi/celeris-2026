@@ -161,8 +161,6 @@ model RegisteredProgram {
   chainFamily          String
   network              String
   packageId            String
-  appStateObjectId     String
-  authorityCapObjectId String
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
   app                  App      @relation(fields: [appId], references: [id], onDelete: Cascade)

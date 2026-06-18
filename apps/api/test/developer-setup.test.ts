@@ -11,7 +11,6 @@ import { toBase64 } from "@mysten/bcs";
 
 const validPackageId = "0x2c45b9cf7d7c5fc33dbd0a1b5c14fffd7a74ac6f9ed6d7f2d881d7ec8e5a2011";
 const validAppStateObjectId = "0x6f5f67b135cb76aab0b0d3cf90a227ca31da93c1df2c0d0e42f7324de8f0fe21";
-const validAuthorityCapObjectId = "0x4d26b27a54c5539f84bd4597bc39ee03dd645f8924a914c1ef0b24f6bcf4ee81";
 const originalEnv = {
   API_ORIGIN: process.env.API_ORIGIN,
   CELERIS_APP_ENCRYPTION_KEY: process.env.CELERIS_APP_ENCRYPTION_KEY,
@@ -111,14 +110,6 @@ const mockSuiSponsorAdapter: SuiSponsorAdapter = {
         digest: "gas-digest"
       }
     };
-  },
-  async createSponsoredSayHello(input) {
-    return this.createSponsoredAction({
-      transactionKindBytes: "mock-transaction-kind-bytes",
-      userWalletAddress: input.userWalletAddress,
-      sponsorWallet: input.sponsorWallet,
-      encryptionKey: input.encryptionKey
-    });
   },
   async verifyTransaction(input) {
     if (input.digest === "bad-digest") {
@@ -504,9 +495,7 @@ describe("developer setup routes", () => {
       url: `/v1/developer/apps/${appId}/program`,
       token: developerToken,
       body: {
-        packageId: validPackageId,
-        appStateObjectId: validAppStateObjectId,
-        authorityCapObjectId: validAuthorityCapObjectId
+        packageId: validPackageId
       }
     });
     await requestJson(app, {
@@ -534,7 +523,6 @@ describe("developer setup routes", () => {
     });
     const { transactionKind } = buildHelloCelerisSayHelloTransaction({
       packageId: validPackageId,
-      appAuthorityCapObjectId: validAuthorityCapObjectId,
       appStateObjectId: validAppStateObjectId,
       username: "  Ada  "
     });
@@ -1051,9 +1039,7 @@ describe("developer setup routes", () => {
       url: `/v1/developer/apps/${createAppResponse.json.app.appId}/program`,
       token,
       body: {
-        packageId: "not-a-sui-id",
-        appStateObjectId: validAppStateObjectId,
-        authorityCapObjectId: validAuthorityCapObjectId
+        packageId: "not-a-sui-id"
       }
     });
 
@@ -1078,9 +1064,7 @@ describe("developer setup routes", () => {
       url: `/v1/developer/apps/${appId}/program`,
       token,
       body: {
-        packageId: validPackageId,
-        appStateObjectId: validAppStateObjectId,
-        authorityCapObjectId: validAuthorityCapObjectId
+        packageId: validPackageId
       }
     });
     const configureAction = await requestJson(app, {

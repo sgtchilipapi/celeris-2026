@@ -12,7 +12,6 @@ import {
 
 const PACKAGE_ID = "0x2";
 const APP_STATE_OBJECT_ID = "0x123";
-const APP_AUTHORITY_CAP_OBJECT_ID = "0x456";
 
 describe("hello-celeris helpers", () => {
   it("trims usernames and enforces the maximum UTF-8 size", () => {
@@ -34,7 +33,6 @@ describe("hello-celeris helpers", () => {
   it("emits the canonical move call and arguments", () => {
     const { transactionKind, normalizedUsername, message } = buildHelloCelerisSayHelloTransaction({
       packageId: PACKAGE_ID,
-      appAuthorityCapObjectId: APP_AUTHORITY_CAP_OBJECT_ID,
       appStateObjectId: APP_STATE_OBJECT_ID,
       username: "  Sam  "
     });
@@ -62,23 +60,18 @@ describe("hello-celeris helpers", () => {
     expect(transactionData.commands[0].MoveCall.arguments).toEqual([
       { Input: 0, type: "object", $kind: "Input" },
       { Input: 1, type: "object", $kind: "Input" },
-      { Input: 2, type: "object", $kind: "Input" },
-      { Input: 3, type: "pure", $kind: "Input" }
+      { Input: 2, type: "pure", $kind: "Input" }
     ]);
     expect((inputs[0].UnresolvedObject as { objectId: string }).objectId).toBe(
-      "0x0000000000000000000000000000000000000000000000000000000000000456"
-    );
-    expect((inputs[1].UnresolvedObject as { objectId: string }).objectId).toBe(
       "0x0000000000000000000000000000000000000000000000000000000000000123"
     );
-    expect((inputs[2].UnresolvedObject as { objectId: string }).objectId).toBe(HELLO_CELERIS_CLOCK_OBJECT_ID);
-    expect(inputs[3]).toEqual({ Pure: { bytes: "A1NhbQ==" }, $kind: "Pure" });
+    expect((inputs[1].UnresolvedObject as { objectId: string }).objectId).toBe(HELLO_CELERIS_CLOCK_OBJECT_ID);
+    expect(inputs[2]).toEqual({ Pure: { bytes: "A1NhbQ==" }, $kind: "Pure" });
   });
 
   it("rejects mismatched transaction payloads and object references", () => {
     const { transaction } = buildHelloCelerisSayHelloTransaction({
       packageId: PACKAGE_ID,
-      appAuthorityCapObjectId: APP_AUTHORITY_CAP_OBJECT_ID,
       appStateObjectId: APP_STATE_OBJECT_ID,
       username: "Sam"
     });
@@ -86,7 +79,6 @@ describe("hello-celeris helpers", () => {
     expect(() =>
       assertHelloCelerisSayHelloTransactionKindMatches(transaction, {
         packageId: PACKAGE_ID,
-        appAuthorityCapObjectId: APP_AUTHORITY_CAP_OBJECT_ID,
         appStateObjectId: APP_STATE_OBJECT_ID,
         username: "Sam"
       })
@@ -95,7 +87,6 @@ describe("hello-celeris helpers", () => {
     expect(() =>
       assertHelloCelerisSayHelloTransactionKindMatches(transaction, {
         packageId: PACKAGE_ID,
-        appAuthorityCapObjectId: APP_AUTHORITY_CAP_OBJECT_ID,
         appStateObjectId: APP_STATE_OBJECT_ID,
         username: "Alex"
       })
@@ -104,8 +95,7 @@ describe("hello-celeris helpers", () => {
     expect(() =>
       assertHelloCelerisSayHelloTransactionKindMatches(transaction, {
         packageId: PACKAGE_ID,
-        appAuthorityCapObjectId: "0x789",
-        appStateObjectId: APP_STATE_OBJECT_ID,
+        appStateObjectId: "0x789",
         username: "Sam"
       })
     ).toThrow(/does not exactly match/);
@@ -114,10 +104,9 @@ describe("hello-celeris helpers", () => {
   it("accepts registered program metadata and user wallet context", () => {
     const built = buildCanonicalHelloCelerisSayHelloTransaction({
       registeredProgram: {
-        packageId: PACKAGE_ID,
-        authorityCapObjectId: APP_AUTHORITY_CAP_OBJECT_ID,
-        appStateObjectId: APP_STATE_OBJECT_ID
+        packageId: PACKAGE_ID
       },
+      appStateObjectId: APP_STATE_OBJECT_ID,
       userWalletAddress: "0xabc",
       username: "  Sam  "
     });

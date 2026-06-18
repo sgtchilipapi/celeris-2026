@@ -217,9 +217,7 @@ export function createDeveloperRouter(options?: DeveloperRouterOptions) {
       requestId: res.locals.requestId,
       developerProfileId: developerProfile.id,
       appId: req.params.appId,
-      packageId: registeredProgram.packageId,
-      appStateObjectId: registeredProgram.appStateObjectId,
-      authorityCapObjectId: registeredProgram.authorityCapObjectId
+      packageId: registeredProgram.packageId
     });
     res.status(200).json({ registeredProgram });
   });
