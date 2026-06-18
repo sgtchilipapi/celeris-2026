@@ -69,8 +69,9 @@ Managed actions are an app-level credit-metering registry, not a registry of blo
 
 - `actionType` is a developer-defined stable key such as `say_hello`, `mint_badge`, or `post_message`.
 - Each action stores credit usage and enabled state for the app.
-- The developer app remains responsible for constructing the transaction kind that should run for a given action.
-- The browser SDK sends the selected `actionType` and transaction kind to Celeris for reservation and sponsorship.
+- The developer app remains responsible for constructing the Sui `Transaction` intent for a given action using `@mysten/sui`.
+- The Celeris browser SDK serializes that `Transaction` to transaction-kind bytes for sponsorship, using the Sui SDK's gasless/sponsored transaction build path.
+- The browser SDK sends the selected `actionType` and serialized transaction-kind bytes to Celeris for reservation and sponsorship.
 - Celeris reserves and captures credits based on the registered action, then sponsor-signs only if the request satisfies the app's sponsorship policy.
 - Celeris should not require a new backend route, schema, or Move-function-specific implementation for every action type.
 - Celeris must still reject sponsorship for transactions outside the app's configured chain, app ownership, registered program scope, or other policy bounds.
@@ -84,8 +85,8 @@ Managed actions are an app-level credit-metering registry, not a registry of blo
 - The backend resolves or creates the developer authorization record after shared auth for dashboard access.
 - Hosted user auth on the auth origin uses real Google account selection.
 - The backend verifies the Google identity token, resolves a stable user salt, derives the zkLogin Sui address, gets proof inputs, and issues the user session.
-- The developer app builds or supplies the `TransactionKind` for the action it wants to execute.
-- The browser SDK passes the developer-selected `actionType` and `TransactionKind` to Celeris.
+- The developer app builds a Sui `Transaction` for the action it wants to execute.
+- The browser SDK converts that transaction to serialized transaction-kind bytes, then passes the developer-selected `actionType` and transaction-kind bytes to Celeris.
 - The backend validates that the action is registered, enabled, app-scoped, and has sufficient user credits before sponsorship.
 - The backend enforces sponsorship policy before signing. At minimum, sponsorship must be bounded to the app's configured chain and registered Sui package or program metadata so the sponsor wallet cannot be used for unrelated transactions.
 - The backend reserves credits, selects sponsor gas, builds transaction bytes from the supplied transaction kind, sponsor-signs them, and returns the sponsorship payload.
@@ -124,7 +125,7 @@ The Sui registration step must not be auto-orchestrated. The repo must include a
 5. View wallet address, credit balance, and app transaction feed.
 6. Purchase credits through the demo purchase flow.
 7. Enter a username and click `Say Hello Celeris`.
-8. The reference app builds the `say_hello` transaction kind, asks the browser SDK to sponsor the registered `say_hello` action, silently signs with zkLogin, and submits to Sui.
+8. The reference app builds a `say_hello` `Transaction`, asks the browser SDK to sponsor the registered `say_hello` action, silently signs with zkLogin, and submits to Sui.
 9. The UI refreshes balance and feed state after completion.
 
 ## Required Env Contract
@@ -195,7 +196,7 @@ The repo should fail closed when required auth, session, prover, or RPC env valu
   - `POST /v1/apps/:appId/actions/:actionType/execute`
   - `POST /v1/apps/:appId/actions/:actionType/complete`
 
-`execute` input should include `{ transactionKind, metadata? }`. The reference `say_hello` demo may include `{ username }` metadata for feed rendering, but sponsorship and credit accounting must key off the registered `actionType`, not a hard-coded Move function.
+`execute` API input should include serialized transaction-kind bytes plus optional metadata, such as `{ transactionKindBytes, metadata? }`. The reference `say_hello` demo may include `{ username }` metadata for feed rendering, but sponsorship and credit accounting must key off the registered `actionType`, not a hard-coded Move function.
 
 `execute` output should include `reservationId`, `transactionBytes`, `sponsorSignature`, `sponsorAddress`, `expiresAt`, `actionType`, and optional normalized metadata.
 
@@ -206,13 +207,15 @@ The repo should fail closed when required auth, session, prover, or RPC env valu
 - Be consumable by a developer-owned frontend app through a minimal initialization contract.
 - Support public runtime configuration for at least `appId`, `apiOrigin`, `hostedAuthOrigin`, `redirectUri`, and optional `suiRpcOrigin`.
 - Generate and store zkLogin ephemeral key material in `sessionStorage` only.
-- Accept a developer-supplied action type and transaction kind for sponsorship.
+- Accept a developer-supplied action type and Sui `Transaction` object for sponsorship at the public SDK boundary.
+- Internally serialize the `Transaction` to transaction-kind bytes before calling the API.
 - Request sponsorship from Celeris for the registered action type.
 - Add zkLogin user signature silently.
 - Submit directly to `CELERIS_SUI_RPC_ORIGIN`.
 - Report completion back to Celeris.
 - Expose simple user methods for auth, catalog, balance, feed, purchase, and generic sponsored action execution.
 - The reference app may provide a `say_hello` helper, but that helper must be layered over the generic action sponsorship API.
+- Celeris should wrap the Sui TypeScript SDK and sponsored transaction flow; it should not replace `@mysten/sui` transaction builders or require app developers to hand-code raw `TransactionKind` bytes.
 
 ## Walkthrough Requirement
 
