@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Celeris",
-  description: "Fresh-start monorepo shell for the Celeris MVP"
+  description: "Credit-based blockchain usage for Sui dApps."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

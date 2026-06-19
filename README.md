@@ -15,6 +15,7 @@ Fresh-start monorepo bootstrap for the Celeris MVP.
 ## MVP Surface Split
 
 - Revised target public origins:
+  - `https://celeris.pro` = public project landing page
   - `https://app.celeris.pro` = Celeris dashboard/app for developers
   - `https://demo.celeris.pro` = sample third-party SDK consumer app
   - `https://auth.celeris.pro` = shared auth for developer sign-in and user login
@@ -81,11 +82,13 @@ Fresh-start monorepo bootstrap for the Celeris MVP.
   - `https://auth.celeris.pro`
   - `https://api.celeris.pro`
 - The clarified target after `FS-01.1` is:
+  - `https://celeris.pro`
   - `https://app.celeris.pro`
   - `https://demo.celeris.pro`
   - `https://auth.celeris.pro`
   - `https://api.celeris.pro`
 - Target local mapping:
+  - `celeris.pro` -> `http://localhost:3101`
   - `app.celeris.pro` -> `http://localhost:3101`
   - `demo.celeris.pro` -> `http://localhost:3101`
   - `auth.celeris.pro` -> `http://localhost:3101`

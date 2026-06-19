@@ -7,7 +7,12 @@ import { requestIdMiddleware } from "./middleware/request-id";
 import { requestLoggerMiddleware } from "./middleware/request-logger";
 import { healthRouter } from "./routes/health";
 
-const developmentTunnelOrigins = ["https://app.celeris.pro", "https://demo.celeris.pro", "https://auth.celeris.pro"];
+const developmentTunnelOrigins = [
+  "https://celeris.pro",
+  "https://app.celeris.pro",
+  "https://demo.celeris.pro",
+  "https://auth.celeris.pro"
+];
 
 export interface CreateAppOptions extends DeveloperRouterOptions {
   corsAllowedOrigins?: string[];
@@ -16,6 +21,7 @@ export interface CreateAppOptions extends DeveloperRouterOptions {
 function getDefaultCorsAllowedOrigins() {
   const env = parseApiEnv(process.env);
   const configuredOrigins = [
+    process.env.CELERIS_PUBLIC_SITE_ORIGIN ?? "https://celeris.pro",
     env.CELERIS_DEVELOPER_APP_ORIGIN,
     env.CELERIS_DEMO_FRONTEND_ORIGIN,
     env.CELERIS_HOSTED_AUTH_ORIGIN

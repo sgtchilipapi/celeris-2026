@@ -1,8 +1,8 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { CelerisLandingPage } from "../../src/components/celeris-landing-page";
 import { DeveloperSetupConsole } from "../../src/components/developer-setup-console";
 import { DemoConsumerShell } from "../../src/components/demo-consumer-shell";
-import { HomeShell } from "../../src/components/home-shell";
 import { getWebRuntimeConfig } from "../../src/env";
 import { resolveWebSurface } from "../../src/surface";
 
@@ -43,15 +43,5 @@ export default async function SurfaceRootPage() {
     return redirect("/sign-in");
   }
 
-  return (
-    <HomeShell
-      mode="demo"
-      config={{
-        apiOrigin: config.NEXT_PUBLIC_API_ORIGIN,
-        hostedAuthOrigin: config.NEXT_PUBLIC_HOSTED_AUTH_ORIGIN,
-        developerAppOrigin: config.NEXT_PUBLIC_DEVELOPER_APP_ORIGIN,
-        demoFrontendOrigin: config.NEXT_PUBLIC_DEMO_FRONTEND_ORIGIN
-      }}
-    />
-  );
+  return <CelerisLandingPage />;
 }
