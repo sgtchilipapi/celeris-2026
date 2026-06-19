@@ -72,6 +72,7 @@ export interface AppRecord {
   slug: string;
   allowedChainId: string;
   authProvider: string;
+  allowedOrigins: string[];
   creditsPerUsd: number;
   createdAt: Date;
   updatedAt: Date;
@@ -248,6 +249,7 @@ export interface CreateDeveloperAppRecordInput {
   slug: string;
   allowedChainId: string;
   authProvider: string;
+  allowedOrigins?: string[];
 }
 
 export interface UpsertSponsorWalletInput {
@@ -312,6 +314,34 @@ export interface CreatePendingActionReservationInput {
   expiresAt: Date;
 }
 
+export interface ReservePendingActionReservationInput {
+  appId: string;
+  walletAddress: string;
+  chainId: string;
+  actionType: string;
+  metadataJson?: string | null;
+  username?: string | null;
+  message?: string | null;
+  creditsReserved: number;
+  expiresAt: Date;
+}
+
+export interface AttachPendingActionSponsorshipInput {
+  appId: string;
+  walletAddress: string;
+  reservationId: string;
+  transactionBytes: string;
+  sponsorSignature: string;
+  sponsorAddress: string;
+  gasCoin: SponsorGasCoinRefInput;
+}
+
+export interface ReleasePendingActionReservationInput {
+  appId: string;
+  walletAddress: string;
+  reservationId: string;
+}
+
 export interface CompletePendingActionReservationInput {
   appId: string;
   walletAddress: string;
@@ -353,6 +383,9 @@ export interface DeveloperSetupRepository {
   completeCheckoutSession(input: CompleteCheckoutSessionRecordInput): Promise<CheckoutSessionRecord | null>;
   getCreditBalance(appId: string, walletAddress: string): Promise<number>;
   createPendingActionReservation(input: CreatePendingActionReservationInput): Promise<PendingActionReservationRecord | null>;
+  reservePendingActionReservation(input: ReservePendingActionReservationInput): Promise<PendingActionReservationRecord | null>;
+  attachPendingActionSponsorship(input: AttachPendingActionSponsorshipInput): Promise<PendingActionReservationRecord | null>;
+  releasePendingActionReservation(input: ReleasePendingActionReservationInput): Promise<PendingActionReservationRecord | null>;
   findPendingActionReservationById(appId: string, reservationId: string): Promise<PendingActionReservationRecord | null>;
   completePendingActionReservation(input: CompletePendingActionReservationInput): Promise<{
     reservation: PendingActionReservationRecord;
@@ -373,6 +406,7 @@ function fromPrismaAppAggregate(record: {
   slug: string;
   allowedChainId: string;
   authProvider: string;
+  allowedOrigins: string[];
   creditsPerUsd: number;
   createdAt: Date;
   updatedAt: Date;
@@ -389,6 +423,7 @@ function fromPrismaAppAggregate(record: {
       slug: record.slug,
       allowedChainId: record.allowedChainId,
       authProvider: record.authProvider,
+      allowedOrigins: record.allowedOrigins ?? [],
       creditsPerUsd: record.creditsPerUsd,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt
@@ -579,7 +614,8 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
           name: input.name,
           slug: input.slug,
           allowedChainId: input.allowedChainId,
-          authProvider: input.authProvider
+          authProvider: input.authProvider,
+          allowedOrigins: input.allowedOrigins ?? []
         },
         include: appInclude
       });
@@ -798,6 +834,23 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
       return aggregate._sum.deltaCredits ?? 0;
     },
     async createPendingActionReservation(input) {
+      const reservation = await this.reservePendingActionReservation(input);
+
+      if (!reservation) {
+        return null;
+      }
+
+      return this.attachPendingActionSponsorship({
+        appId: input.appId,
+        walletAddress: input.walletAddress,
+        reservationId: reservation.id,
+        transactionBytes: input.transactionBytes,
+        sponsorSignature: input.sponsorSignature,
+        sponsorAddress: input.sponsorAddress,
+        gasCoin: input.gasCoin
+      });
+    },
+    async reservePendingActionReservation(input) {
       return prisma.$transaction(async (tx) => {
         const balance = await tx.creditLedgerEntry.aggregate({
           where: {
@@ -824,21 +877,9 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
             username: input.username ?? null,
             message: input.message ?? null,
             creditsReserved: input.creditsReserved,
-            transactionBytes: input.transactionBytes,
-            sponsorSignature: input.sponsorSignature,
-            sponsorAddress: input.sponsorAddress,
-            expiresAt: input.expiresAt
-          }
-        });
-
-        await tx.sponsorGasCoinLock.create({
-          data: {
-            appId: input.appId,
-            reservationId: reservation.id,
-            objectId: input.gasCoin.objectId,
-            version: input.gasCoin.version,
-            digest: input.gasCoin.digest,
-            status: "locked",
+            transactionBytes: "",
+            sponsorSignature: "",
+            sponsorAddress: "",
             expiresAt: input.expiresAt
           }
         });
@@ -857,6 +898,55 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
 
         return reservation;
       });
+    },
+    async attachPendingActionSponsorship(input) {
+      return prisma.$transaction(async (tx) => {
+        const reservation = await tx.pendingActionReservation.findFirst({
+          where: {
+            id: input.reservationId,
+            appId: input.appId,
+            walletAddress: input.walletAddress,
+            status: "reserved"
+          }
+        });
+
+        if (!reservation) {
+          return null;
+        }
+
+        const updated = await tx.pendingActionReservation.update({
+          where: { id: reservation.id },
+          data: {
+            transactionBytes: input.transactionBytes,
+            sponsorSignature: input.sponsorSignature,
+            sponsorAddress: input.sponsorAddress
+          }
+        });
+
+        await tx.sponsorGasCoinLock.create({
+          data: {
+            appId: input.appId,
+            reservationId: reservation.id,
+            objectId: input.gasCoin.objectId,
+            version: input.gasCoin.version,
+            digest: input.gasCoin.digest,
+            status: "locked",
+            expiresAt: reservation.expiresAt
+          }
+        });
+
+        return updated;
+      });
+    },
+    async releasePendingActionReservation(input) {
+      const result = await this.completePendingActionReservation({
+        appId: input.appId,
+        walletAddress: input.walletAddress,
+        reservationId: input.reservationId,
+        outcome: "failed"
+      });
+
+      return result?.reservation ?? null;
     },
     async findPendingActionReservationById(appId, reservationId) {
       return prisma.pendingActionReservation.findFirst({
@@ -1217,6 +1307,7 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
         slug: input.slug,
         allowedChainId: input.allowedChainId,
         authProvider: input.authProvider,
+        allowedOrigins: input.allowedOrigins ?? [],
         creditsPerUsd: 100,
         createdAt: now,
         updatedAt: now
@@ -1383,6 +1474,23 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
       return balance;
     },
     async createPendingActionReservation(input) {
+      const reservation = await this.reservePendingActionReservation(input);
+
+      if (!reservation) {
+        return null;
+      }
+
+      return this.attachPendingActionSponsorship({
+        appId: input.appId,
+        walletAddress: input.walletAddress,
+        reservationId: reservation.id,
+        transactionBytes: input.transactionBytes,
+        sponsorSignature: input.sponsorSignature,
+        sponsorAddress: input.sponsorAddress,
+        gasCoin: input.gasCoin
+      });
+    },
+    async reservePendingActionReservation(input) {
       let balance = 0;
       for (const entry of ledgerEntriesByReference.values()) {
         if (entry.appId === input.appId && entry.walletAddress === input.walletAddress) {
@@ -1404,9 +1512,9 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
         username: input.username ?? null,
         message: input.message ?? null,
         creditsReserved: input.creditsReserved,
-        transactionBytes: input.transactionBytes,
-        sponsorSignature: input.sponsorSignature,
-        sponsorAddress: input.sponsorAddress,
+        transactionBytes: "",
+        sponsorSignature: "",
+        sponsorAddress: "",
         expiresAt: input.expiresAt,
         submittedDigest: null,
         createdAt: now,
@@ -1419,6 +1527,38 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
         deltaCredits: -record.creditsReserved
       });
       return record;
+    },
+    async attachPendingActionSponsorship(input) {
+      const existing = pendingActionReservations.get(input.reservationId);
+
+      if (
+        !existing ||
+        existing.appId !== input.appId ||
+        existing.walletAddress !== input.walletAddress ||
+        existing.status !== "reserved"
+      ) {
+        return null;
+      }
+
+      const updated: PendingActionReservationRecord = {
+        ...existing,
+        transactionBytes: input.transactionBytes,
+        sponsorSignature: input.sponsorSignature,
+        sponsorAddress: input.sponsorAddress,
+        updatedAt: new Date()
+      };
+      pendingActionReservations.set(updated.id, updated);
+      return updated;
+    },
+    async releasePendingActionReservation(input) {
+      const result = await this.completePendingActionReservation({
+        appId: input.appId,
+        walletAddress: input.walletAddress,
+        reservationId: input.reservationId,
+        outcome: "failed"
+      });
+
+      return result?.reservation ?? null;
     },
     async findPendingActionReservationById(appId, reservationId) {
       const record = pendingActionReservations.get(reservationId);

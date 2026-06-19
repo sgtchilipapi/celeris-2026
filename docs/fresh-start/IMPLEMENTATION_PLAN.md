@@ -849,7 +849,7 @@ Mitigation:
 
 The implementation is complete only when all of the following are true:
 
-- all eight slices are complete, including Slice 4.1
+- all nine slices are complete, including Slice 4.1 and Slice 4.2 sponsorship credit/policy hardening
 - the Move package is published and can be manually initialized
 - a brand new app can be created in Celeris from the setup console or developer API
 - the developer dashboard lives on the app origin while the reference consumer app lives on the demo origin

@@ -42,7 +42,10 @@ import {
   registerProgramSchema,
   type RegisterProgramInput,
   deriveZkLoginSalt,
-  deriveZkLoginWalletAddress
+  deriveZkLoginWalletAddress,
+  HELLO_CELERIS_MODULE_NAME,
+  HELLO_CELERIS_SAY_HELLO_FUNCTION,
+  parseSuiPackageId
 } from "@celeris/shared";
 import { badGateway, badRequest, conflict, notFound, unauthorized } from "../../lib/http-error";
 import { decryptSecret, encryptSecret, generateOpaqueToken, sha256 } from "./crypto";
@@ -222,6 +225,7 @@ function toDeveloperApp(
     slug: aggregate.app.slug,
     allowedChainId: chainIdSchema.parse(aggregate.app.allowedChainId),
     authProvider: authProviderSchema.parse(aggregate.app.authProvider),
+    allowedOrigins: normalizeAllowedOrigins(aggregate.app.allowedOrigins),
     createdAt: toIsoString(aggregate.app.createdAt),
     updatedAt: toIsoString(aggregate.app.updatedAt),
     sponsorWallet: aggregate.sponsorWallet ? toSponsorWallet(aggregate.sponsorWallet) : null,
@@ -262,6 +266,10 @@ function slugifyName(name: string) {
 
 function parseOrigin(value: string) {
   return new URL(value).origin;
+}
+
+function normalizeAllowedOrigins(origins: string[]) {
+  return Array.from(new Set(origins.map(parseOrigin))).sort();
 }
 
 function parseProofInputs(value: string | null) {
@@ -602,10 +610,7 @@ export class DeveloperSetupService {
       }
 
       clientName = app.app.name;
-
-      if (redirectOrigin !== parseOrigin(this.demoFrontendOrigin)) {
-        throw badRequest("App consumer redirect URI must target the demo origin");
-      }
+      this.assertOriginAllowedForApp(app, redirectOrigin, "App consumer redirect URI origin is not allowed for this app");
     } else {
       throw badRequest("Unsupported auth client kind");
     }
@@ -919,7 +924,8 @@ export class DeveloperSetupService {
       name: payload.name,
       slug: `${slugifyName(payload.name)}-${randomUUID().slice(0, 8)}`,
       allowedChainId: payload.allowedChainId,
-      authProvider: payload.authProvider
+      authProvider: payload.authProvider,
+      allowedOrigins: normalizeAllowedOrigins(payload.allowedOrigins?.length ? payload.allowedOrigins : [this.demoFrontendOrigin])
     });
 
     return toDeveloperApp(created, {
@@ -1106,15 +1112,22 @@ export class DeveloperSetupService {
     };
   }
 
-  async executeSayHello(session: AppConsumerSession, appId: string, input: ExecuteSayHelloInput) {
-    return this.executeAction(session, appId, CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO, input);
+  async executeSayHello(session: AppConsumerSession, appId: string, input: ExecuteSayHelloInput, requestOrigin?: string | null) {
+    return this.executeAction(session, appId, CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO, input, requestOrigin);
   }
 
-  async executeAction(session: AppConsumerSession, appId: string, actionTypeInput: string, input: ExecuteManagedActionInput) {
+  async executeAction(
+    session: AppConsumerSession,
+    appId: string,
+    actionTypeInput: string,
+    input: ExecuteManagedActionInput,
+    requestOrigin?: string | null
+  ) {
     const appConsumer = this.requireAppConsumerSession(session, appId);
     const app = await this.requirePublicApp(appId);
     const actionType = managedActionTypeSchema.parse(actionTypeInput);
     const payload = executeManagedActionSchema.parse(input);
+    this.assertRequestOriginAllowedForApp(app, requestOrigin);
 
     if (!app.registeredProgram) {
       throw badRequest("App Sui program is not registered");
@@ -1135,15 +1148,13 @@ export class DeveloperSetupService {
     }
 
     const metadata = this.normalizeActionMetadata(actionType, payload.metadata ?? null);
-    this.assertTransactionKindBytesWithinRegisteredProgram(payload.transactionKindBytes, app.registeredProgram);
+    this.assertTransactionKindBytesWithinRegisteredProgram(
+      payload.transactionKindBytes,
+      app.registeredProgram,
+      actionType
+    );
 
-    const sponsored = await this.suiSponsorAdapter.createSponsoredAction({
-      transactionKindBytes: payload.transactionKindBytes,
-      userWalletAddress: appConsumer.walletAddress,
-      sponsorWallet: app.sponsorWallet,
-      encryptionKey: this.encryptionKey
-    });
-    const reservation = await this.repository.createPendingActionReservation({
+    const reservation = await this.repository.reservePendingActionReservation({
       appId,
       walletAddress: appConsumer.walletAddress,
       chainId: appConsumer.chainId,
@@ -1152,10 +1163,6 @@ export class DeveloperSetupService {
       username: typeof metadata?.username === "string" ? metadata.username : null,
       message: typeof metadata?.message === "string" ? metadata.message : null,
       creditsReserved: action.priceCredits,
-      transactionBytes: sponsored.transactionBytes,
-      sponsorSignature: sponsored.sponsorSignature,
-      sponsorAddress: sponsored.sponsorAddress,
-      gasCoin: sponsored.gasCoin,
       expiresAt: new Date(Date.now() + ACTION_RESERVATION_TTL_MS)
     });
 
@@ -1163,10 +1170,58 @@ export class DeveloperSetupService {
       throw badRequest("Insufficient credits");
     }
 
+    let sponsored: SponsoredTransactionPayload;
+
+    try {
+      sponsored = await this.suiSponsorAdapter.createSponsoredAction({
+        transactionKindBytes: payload.transactionKindBytes,
+        userWalletAddress: appConsumer.walletAddress,
+        sponsorWallet: app.sponsorWallet,
+        encryptionKey: this.encryptionKey
+      });
+    } catch (error) {
+      await this.repository.releasePendingActionReservation({
+        appId,
+        walletAddress: appConsumer.walletAddress,
+        reservationId: reservation.id
+      });
+      throw error;
+    }
+
+    let sponsoredReservation: PendingActionReservationRecord | null;
+
+    try {
+      sponsoredReservation = await this.repository.attachPendingActionSponsorship({
+        appId,
+        walletAddress: appConsumer.walletAddress,
+        reservationId: reservation.id,
+        transactionBytes: sponsored.transactionBytes,
+        sponsorSignature: sponsored.sponsorSignature,
+        sponsorAddress: sponsored.sponsorAddress,
+        gasCoin: sponsored.gasCoin
+      });
+    } catch (error) {
+      await this.repository.releasePendingActionReservation({
+        appId,
+        walletAddress: appConsumer.walletAddress,
+        reservationId: reservation.id
+      });
+      throw error;
+    }
+
+    if (!sponsoredReservation) {
+      await this.repository.releasePendingActionReservation({
+        appId,
+        walletAddress: appConsumer.walletAddress,
+        reservationId: reservation.id
+      });
+      throw badGateway("Failed to persist sponsored transaction");
+    }
+
     const availableCredits = await this.repository.getCreditBalance(appId, appConsumer.walletAddress);
 
     return {
-      sponsorship: this.toSponsorship(reservation),
+      sponsorship: this.toSponsorship(sponsoredReservation),
       balance: toBalance({
         appId,
         walletAddress: appConsumer.walletAddress,
@@ -1373,6 +1428,30 @@ export class DeveloperSetupService {
     return app;
   }
 
+  private assertOriginAllowedForApp(app: DeveloperAppAggregateRecord, origin: string, message: string) {
+    const allowedOrigins = normalizeAllowedOrigins(app.app.allowedOrigins);
+
+    if (allowedOrigins.length === 0 || !allowedOrigins.includes(origin)) {
+      throw badRequest(message);
+    }
+  }
+
+  private assertRequestOriginAllowedForApp(app: DeveloperAppAggregateRecord, requestOrigin?: string | null) {
+    if (!requestOrigin) {
+      throw badRequest("Request origin is required for app sponsorship");
+    }
+
+    let origin: string;
+
+    try {
+      origin = parseOrigin(requestOrigin);
+    } catch {
+      throw badRequest("Request origin is invalid");
+    }
+
+    this.assertOriginAllowedForApp(app, origin, "Request origin is not allowed for this app");
+  }
+
   private async requireApp(developerProfileId: string, appId: string) {
     const app = await this.repository.findAppByIdForDeveloperProfile(developerProfileId, appId);
 
@@ -1445,22 +1524,85 @@ export class DeveloperSetupService {
 
   private assertTransactionKindBytesWithinRegisteredProgram(
     transactionKindBytes: string,
-    registeredProgram: RegisteredProgramRecord
+    registeredProgram: RegisteredProgramRecord,
+    actionType: string
   ) {
-    let transactionData: unknown;
+    let transactionData: ReturnType<Transaction["getData"]>;
 
     try {
       transactionData = Transaction.fromKind(fromBase64(transactionKindBytes)).getData();
     } catch {
-      return;
+      throw badRequest("Transaction kind bytes are malformed or unparseable");
     }
 
-    const serialized = JSON.stringify(transactionData).toLowerCase();
-    const packageId = registeredProgram.packageId.toLowerCase();
+    const commands = Array.isArray(transactionData.commands) ? transactionData.commands : [];
+    const packageId = parseSuiPackageId(registeredProgram.packageId);
+    let hasAllowedMoveCall = false;
 
-    if (!serialized.includes(packageId)) {
+    if (commands.length === 0) {
       throw badRequest("Transaction kind is outside the app sponsorship policy");
     }
+
+    for (const command of commands) {
+      const moveCall = this.extractMoveCallCommand(command);
+
+      if (!moveCall) {
+        throw badRequest("Transaction kind is outside the app sponsorship policy");
+      }
+
+      let commandPackageId: string;
+
+      try {
+        commandPackageId = parseSuiPackageId(moveCall.package);
+      } catch {
+        throw badRequest("Transaction kind is outside the app sponsorship policy");
+      }
+
+      if (commandPackageId !== packageId) {
+        throw badRequest("Transaction kind is outside the app sponsorship policy");
+      }
+
+      if (
+        actionType === CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO &&
+        (moveCall.module !== HELLO_CELERIS_MODULE_NAME || moveCall.function !== HELLO_CELERIS_SAY_HELLO_FUNCTION)
+      ) {
+        throw badRequest("Transaction kind is outside the app sponsorship policy");
+      }
+
+      hasAllowedMoveCall = true;
+    }
+
+    if (!hasAllowedMoveCall) {
+      throw badRequest("Transaction kind is outside the app sponsorship policy");
+    }
+  }
+
+  private extractMoveCallCommand(command: unknown): { package: string; module: string; function: string } | null {
+    if (!command || typeof command !== "object") {
+      return null;
+    }
+
+    const moveCall = (command as { MoveCall?: unknown }).MoveCall;
+
+    if (!moveCall || typeof moveCall !== "object") {
+      return null;
+    }
+
+    const parsed = moveCall as { package?: unknown; module?: unknown; function?: unknown };
+
+    if (
+      typeof parsed.package !== "string" ||
+      typeof parsed.module !== "string" ||
+      typeof parsed.function !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      package: parsed.package,
+      module: parsed.module,
+      function: parsed.function
+    };
   }
 
   private normalizeActionMetadata(actionType: string, metadata: Record<string, unknown> | null) {

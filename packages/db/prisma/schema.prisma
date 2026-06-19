@@ -108,6 +108,7 @@ model App {
   slug             String             @unique
   allowedChainId   String
   authProvider     String
+  allowedOrigins   String[]           @default([])
   creditsPerUsd    Int                @default(100)
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt

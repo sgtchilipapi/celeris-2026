@@ -1,0 +1,1 @@
+ALTER TABLE "App" ADD COLUMN "allowedOrigins" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

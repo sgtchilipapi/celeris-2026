@@ -308,7 +308,8 @@ export function createDeveloperRouter(options?: DeveloperRouterOptions) {
       res.locals.userSession,
       requireRouteParam(req.params.appId, "appId"),
       requireRouteParam(req.params.actionType, "actionType"),
-      req.body
+      req.body,
+      req.header("origin")
     );
     logger.info("audit.action.executed", {
       requestId: res.locals.requestId,

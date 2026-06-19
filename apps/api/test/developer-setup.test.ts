@@ -8,6 +8,7 @@ import { createDeveloperSetupService } from "../src/features/developer/service";
 import { unauthorized } from "../src/lib/http-error";
 import { buildHelloCelerisSayHelloTransaction } from "@celeris/shared";
 import { toBase64 } from "@mysten/bcs";
+import { Transaction, TransactionDataBuilder } from "@mysten/sui/transactions";
 
 const validPackageId = "0x2c45b9cf7d7c5fc33dbd0a1b5c14fffd7a74ac6f9ed6d7f2d881d7ec8e5a2011";
 const validAppStateObjectId = "0x6f5f67b135cb76aab0b0d3cf90a227ca31da93c1df2c0d0e42f7324de8f0fe21";
@@ -121,7 +122,7 @@ const mockSuiSponsorAdapter: SuiSponsorAdapter = {
   }
 };
 
-function createTestHarness() {
+function createTestHarness(options: { suiSponsorAdapter?: SuiSponsorAdapter } = {}) {
   const service = createDeveloperSetupService({
     repository: createInMemoryDeveloperSetupRepository(),
     encryptionKey: "test-encryption-key-0123456789",
@@ -137,10 +138,23 @@ function createTestHarness() {
     zkLoginProverOrigin: "http://localhost:9000",
     googleOAuthClient: createMockGoogleOAuthClient(),
     zkLoginProver: mockZkLoginProver,
-    suiSponsorAdapter: mockSuiSponsorAdapter
+    suiSponsorAdapter: options.suiSponsorAdapter ?? mockSuiSponsorAdapter
   });
 
   return createApp({ service });
+}
+
+function toTransactionKindBytes(transaction: Transaction) {
+  return toBase64(TransactionDataBuilder.restore(transaction.getData() as never).build({ onlyTransactionKind: true }));
+}
+
+function buildMoveCallTransactionKindBytes(packageId: string, moduleName = "hello_celeris", functionName = "say_hello") {
+  const transaction = new Transaction();
+  transaction.moveCall({
+    target: `${packageId}::${moduleName}::${functionName}`,
+    arguments: []
+  });
+  return toTransactionKindBytes(transaction);
 }
 
 async function requestJson(
@@ -150,6 +164,7 @@ async function requestJson(
     url: string;
     body?: Record<string, unknown>;
     token?: string;
+    headers?: Record<string, string>;
   }
 ) {
   const appHandler = app as unknown as {
@@ -158,11 +173,10 @@ async function requestJson(
   const request = createRequest({
     method: options.method,
     url: options.url,
-    headers: options.token
-      ? {
-          authorization: `Bearer ${options.token}`
-        }
-      : undefined,
+    headers: {
+      ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+      ...(options.headers ?? {})
+    },
     body: options.body as never
   });
   const response = createResponse({
@@ -249,6 +263,64 @@ async function authenticateConsumer(app: ReturnType<typeof createTestHarness>, a
   return token.json.session.token as string;
 }
 
+async function createConfiguredSponsoredApp(app: ReturnType<typeof createTestHarness>, options: { fundCredits?: boolean; actionType?: string } = {}) {
+  const actionType = options.actionType ?? "say_hello";
+  const developerToken = await authenticateDashboard(app, `${actionType}-owner@example.com`);
+  const createAppResponse = await requestJson(app, {
+    method: "POST",
+    url: "/v1/developer/apps",
+    token: developerToken,
+    body: {
+      name: `${actionType} Sponsored App`
+    }
+  });
+  const appId = createAppResponse.json.app.appId as string;
+  await requestJson(app, {
+    method: "POST",
+    url: `/v1/developer/apps/${appId}/sponsor-wallet`,
+    token: developerToken
+  });
+  await requestJson(app, {
+    method: "PUT",
+    url: `/v1/developer/apps/${appId}/program`,
+    token: developerToken,
+    body: {
+      packageId: validPackageId
+    }
+  });
+  await requestJson(app, {
+    method: "PUT",
+    url: `/v1/developer/apps/${appId}/actions/${actionType}`,
+    token: developerToken,
+    body: {
+      priceCredits: 7,
+      isEnabled: true
+    }
+  });
+  const consumerToken = await authenticateConsumer(app, appId, `${actionType}-user`);
+
+  if (options.fundCredits) {
+    const checkout = await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${appId}/checkout-sessions`,
+      token: consumerToken,
+      body: {
+        usdAmount: 1
+      }
+    });
+    await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${appId}/checkout-sessions/${checkout.json.checkoutSession.checkoutSessionId}/complete`,
+      token: consumerToken
+    });
+  }
+
+  return {
+    appId,
+    consumerToken
+  };
+}
+
 describe("developer setup routes", () => {
   let app: ReturnType<typeof createTestHarness>;
 
@@ -290,6 +362,7 @@ describe("developer setup routes", () => {
       hostedAuthOrigin: "http://localhost:3101",
       demoOrigin: "http://localhost:3103"
     });
+    expect(createAppResponse.json.app.allowedOrigins).toEqual(["http://localhost:3103"]);
 
     const listApps = await requestJson(app, {
       method: "GET",
@@ -521,18 +594,41 @@ describe("developer setup routes", () => {
       url: `/v1/apps/${appId}/checkout-sessions/${checkout.json.checkoutSession.checkoutSessionId}/complete`,
       token: consumerToken
     });
-    const { transactionKind } = buildHelloCelerisSayHelloTransaction({
+    const transactionKind = buildHelloCelerisSayHelloTransaction({
       packageId: validPackageId,
       appStateObjectId: validAppStateObjectId,
       username: "  Ada  "
+    }).transactionKind;
+    const transactionKindBytes = buildMoveCallTransactionKindBytes(validPackageId);
+
+    const disallowedOriginExecute = await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${appId}/actions/say_hello/execute`,
+      token: consumerToken,
+      headers: {
+        origin: "https://evil.example"
+      },
+      body: {
+        transactionKindBytes,
+        transactionKind,
+        metadata: {
+          username: "  Ada  "
+        }
+      }
     });
+
+    expect(disallowedOriginExecute.statusCode).toBe(400);
+    expect(disallowedOriginExecute.json.error).toBe("Request origin is not allowed for this app");
 
     const execute = await requestJson(app, {
       method: "POST",
       url: `/v1/apps/${appId}/actions/say_hello/execute`,
       token: consumerToken,
+      headers: {
+        origin: "http://localhost:3103"
+      },
       body: {
-        transactionKindBytes: toBase64(new TextEncoder().encode(JSON.stringify(transactionKind))),
+        transactionKindBytes,
         transactionKind,
         metadata: {
           username: "  Ada  "
@@ -587,6 +683,193 @@ describe("developer setup routes", () => {
     expect(feed.statusCode).toBe(200);
     expect(feed.json.transactions).toHaveLength(1);
     expect(feed.json.transactions[0].digest).toBe("digest_123");
+  });
+
+  it("does not sponsor-sign insufficient-credit action requests", async () => {
+    const createSponsoredAction = vi.fn(mockSuiSponsorAdapter.createSponsoredAction);
+    const sponsorAdapter: SuiSponsorAdapter = {
+      ...mockSuiSponsorAdapter,
+      createSponsoredAction
+    };
+    app = createTestHarness({ suiSponsorAdapter: sponsorAdapter });
+    const configured = await createConfiguredSponsoredApp(app, { actionType: "mint_badge" });
+
+    const execute = await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${configured.appId}/actions/mint_badge/execute`,
+      token: configured.consumerToken,
+      headers: {
+        origin: "http://localhost:3103"
+      },
+      body: {
+        transactionKindBytes: buildMoveCallTransactionKindBytes(validPackageId, "badge", "mint"),
+        metadata: {
+          badge: "founder"
+        }
+      }
+    });
+
+    expect(execute.statusCode).toBe(400);
+    expect(execute.json.error).toBe("Insufficient credits");
+    expect(createSponsoredAction).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed and unparseable transaction-kind bytes before sponsorship", async () => {
+    const createSponsoredAction = vi.fn(mockSuiSponsorAdapter.createSponsoredAction);
+    const sponsorAdapter: SuiSponsorAdapter = {
+      ...mockSuiSponsorAdapter,
+      createSponsoredAction
+    };
+    app = createTestHarness({ suiSponsorAdapter: sponsorAdapter });
+    const configured = await createConfiguredSponsoredApp(app, { actionType: "mint_badge", fundCredits: true });
+
+    const malformed = await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${configured.appId}/actions/mint_badge/execute`,
+      token: configured.consumerToken,
+      headers: {
+        origin: "http://localhost:3103"
+      },
+      body: {
+        transactionKindBytes: "not base64!!!"
+      }
+    });
+    const unparseable = await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${configured.appId}/actions/mint_badge/execute`,
+      token: configured.consumerToken,
+      headers: {
+        origin: "http://localhost:3103"
+      },
+      body: {
+        transactionKindBytes: toBase64(new Uint8Array([1, 2, 3, 4]))
+      }
+    });
+
+    expect(malformed.statusCode).toBe(400);
+    expect(malformed.json.error).toBe("Transaction kind bytes are malformed or unparseable");
+    expect(unparseable.statusCode).toBe(400);
+    expect(unparseable.json.error).toBe("Transaction kind bytes are malformed or unparseable");
+    expect(createSponsoredAction).not.toHaveBeenCalled();
+  });
+
+  it("rejects valid transaction-kind bytes outside the registered package policy", async () => {
+    const createSponsoredAction = vi.fn(mockSuiSponsorAdapter.createSponsoredAction);
+    const sponsorAdapter: SuiSponsorAdapter = {
+      ...mockSuiSponsorAdapter,
+      createSponsoredAction
+    };
+    app = createTestHarness({ suiSponsorAdapter: sponsorAdapter });
+    const configured = await createConfiguredSponsoredApp(app, { actionType: "mint_badge", fundCredits: true });
+    const wrongPackageId = "0x3c45b9cf7d7c5fc33dbd0a1b5c14fffd7a74ac6f9ed6d7f2d881d7ec8e5a2011";
+
+    const execute = await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${configured.appId}/actions/mint_badge/execute`,
+      token: configured.consumerToken,
+      headers: {
+        origin: "http://localhost:3103"
+      },
+      body: {
+        transactionKindBytes: buildMoveCallTransactionKindBytes(wrongPackageId, "badge", "mint")
+      }
+    });
+
+    expect(execute.statusCode).toBe(400);
+    expect(execute.json.error).toBe("Transaction kind is outside the app sponsorship policy");
+    expect(createSponsoredAction).not.toHaveBeenCalled();
+  });
+
+  it("rejects mixed-package transaction-kind bytes", async () => {
+    const createSponsoredAction = vi.fn(mockSuiSponsorAdapter.createSponsoredAction);
+    const sponsorAdapter: SuiSponsorAdapter = {
+      ...mockSuiSponsorAdapter,
+      createSponsoredAction
+    };
+    app = createTestHarness({ suiSponsorAdapter: sponsorAdapter });
+    const configured = await createConfiguredSponsoredApp(app, { actionType: "mint_badge", fundCredits: true });
+    const wrongPackageId = "0x3c45b9cf7d7c5fc33dbd0a1b5c14fffd7a74ac6f9ed6d7f2d881d7ec8e5a2011";
+    const transaction = new Transaction();
+    transaction.moveCall({ target: `${validPackageId}::badge::mint`, arguments: [] });
+    transaction.moveCall({ target: `${wrongPackageId}::badge::mint`, arguments: [] });
+
+    const execute = await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${configured.appId}/actions/mint_badge/execute`,
+      token: configured.consumerToken,
+      headers: {
+        origin: "http://localhost:3103"
+      },
+      body: {
+        transactionKindBytes: toTransactionKindBytes(transaction)
+      }
+    });
+
+    expect(execute.statusCode).toBe(400);
+    expect(execute.json.error).toBe("Transaction kind is outside the app sponsorship policy");
+    expect(createSponsoredAction).not.toHaveBeenCalled();
+  });
+
+  it("allows valid registered-package transaction-kind bytes to proceed to sponsorship", async () => {
+    const createSponsoredAction = vi.fn(mockSuiSponsorAdapter.createSponsoredAction);
+    const sponsorAdapter: SuiSponsorAdapter = {
+      ...mockSuiSponsorAdapter,
+      createSponsoredAction
+    };
+    app = createTestHarness({ suiSponsorAdapter: sponsorAdapter });
+    const configured = await createConfiguredSponsoredApp(app, { actionType: "mint_badge", fundCredits: true });
+
+    const execute = await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${configured.appId}/actions/mint_badge/execute`,
+      token: configured.consumerToken,
+      headers: {
+        origin: "http://localhost:3103"
+      },
+      body: {
+        transactionKindBytes: buildMoveCallTransactionKindBytes(validPackageId, "badge", "mint"),
+        metadata: {
+          badge: "founder"
+        }
+      }
+    });
+
+    expect(execute.statusCode).toBe(201);
+    expect(execute.json.sponsorship.actionType).toBe("mint_badge");
+    expect(execute.json.balance.availableCredits).toBe(93);
+    expect(createSponsoredAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases reserved credits when sponsor signing fails", async () => {
+    const sponsorAdapter: SuiSponsorAdapter = {
+      ...mockSuiSponsorAdapter,
+      async createSponsoredAction() {
+        throw new Error("sponsor unavailable");
+      }
+    };
+    app = createTestHarness({ suiSponsorAdapter: sponsorAdapter });
+    const configured = await createConfiguredSponsoredApp(app, { actionType: "mint_badge", fundCredits: true });
+
+    const execute = await requestJson(app, {
+      method: "POST",
+      url: `/v1/apps/${configured.appId}/actions/mint_badge/execute`,
+      token: configured.consumerToken,
+      headers: {
+        origin: "http://localhost:3103"
+      },
+      body: {
+        transactionKindBytes: buildMoveCallTransactionKindBytes(validPackageId, "badge", "mint")
+      }
+    });
+    const balance = await requestJson(app, {
+      method: "GET",
+      url: `/v1/apps/${configured.appId}/balance`,
+      token: configured.consumerToken
+    });
+
+    expect(execute.statusCode).toBe(500);
+    expect(balance.statusCode).toBe(200);
+    expect(balance.json.balance.availableCredits).toBe(100);
   });
 
   it("keeps mock identity completion unreachable from the production auth route", async () => {
@@ -766,7 +1049,8 @@ describe("developer setup routes", () => {
       name: "Legacy Salt App",
       slug: "legacy-salt-app",
       allowedChainId: "sui:testnet",
-      authProvider: "zklogin"
+      authProvider: "zklogin",
+      allowedOrigins: ["http://localhost:3103"]
     });
     let proverSalt: string | null = null;
     const service = createDeveloperSetupService({
@@ -971,7 +1255,51 @@ describe("developer setup routes", () => {
     });
 
     expect(invalidRedirect.statusCode).toBe(400);
-    expect(invalidRedirect.json.error).toBe("App consumer redirect URI must target the demo origin");
+    expect(invalidRedirect.json.error).toBe("App consumer redirect URI origin is not allowed for this app");
+  });
+
+  it("uses app allowed origins for app-consumer login requests", async () => {
+    const developerToken = await authenticateDashboard(app, "allowed-origin-owner@example.com");
+    const createAppResponse = await requestJson(app, {
+      method: "POST",
+      url: "/v1/developer/apps",
+      token: developerToken,
+      body: {
+        name: "Allowed Origin App",
+        allowedOrigins: ["https://merchant.example", "https://merchant.example/app"]
+      }
+    });
+    const appId = createAppResponse.json.app.appId as string;
+
+    expect(createAppResponse.statusCode).toBe(201);
+    expect(createAppResponse.json.app.allowedOrigins).toEqual(["https://merchant.example"]);
+
+    const loginRequest = await requestJson(app, {
+      method: "POST",
+      url: "/v1/auth/login-requests",
+      body: {
+        clientKind: "app_consumer",
+        clientId: appId,
+        appId,
+        redirectUri: "https://merchant.example/auth/callback"
+      }
+    });
+
+    expect(loginRequest.statusCode).toBe(201);
+
+    const invalidRedirect = await requestJson(app, {
+      method: "POST",
+      url: "/v1/auth/login-requests",
+      body: {
+        clientKind: "app_consumer",
+        clientId: appId,
+        appId,
+        redirectUri: "https://evil.example/auth/callback"
+      }
+    });
+
+    expect(invalidRedirect.statusCode).toBe(400);
+    expect(invalidRedirect.json.error).toBe("App consumer redirect URI origin is not allowed for this app");
   });
 
   it("rejects invalid dashboard redirect audiences", async () => {

@@ -130,7 +130,11 @@ export const meResponseSchema = z.object({
 export const createDeveloperAppSchema = z.object({
   name: z.string().trim().min(1, "name is required").max(80, "name must be at most 80 characters"),
   allowedChainId: chainIdSchema.default("sui:testnet"),
-  authProvider: authProviderSchema.default("zklogin")
+  authProvider: authProviderSchema.default("zklogin"),
+  allowedOrigins: z
+    .array(z.string().url())
+    .max(10, "allowedOrigins must include at most 10 origins")
+    .optional()
 });
 
 export const sponsorWalletSchema = z.object({
@@ -327,6 +331,7 @@ export const developerAppSchema = z.object({
   slug: z.string().min(1),
   allowedChainId: chainIdSchema,
   authProvider: authProviderSchema,
+  allowedOrigins: z.array(z.string().url()).default([]),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   sponsorWallet: sponsorWalletSchema.nullable(),

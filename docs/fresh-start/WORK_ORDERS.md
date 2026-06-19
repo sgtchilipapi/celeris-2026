@@ -28,7 +28,8 @@ This document turns the implementation plan into ordered work orders that an age
 | `FS-03` | complete | Credits And Mock Checkout | Catalog, balance, checkout flow, persistent credit ledger | `FS-01`, `FS-01.1`, `FS-02`, `FS-02.1` |
 | `FS-04` | complete | Sponsored Say Hello And Feed | Move package finalization, reference tx builder, sponsor-sign flow, completion, app-wide feed | `FS-01`, `FS-01.1`, `FS-02`, `FS-02.1`, `FS-03` |
 | `FS-04.1` | complete | Generic Metered Sponsored Actions | Replace hard-coded `say_hello` action routes with generic action registry, sponsorship, and SDK execution | `FS-01`, `FS-03`, `FS-04` |
-| `FS-05` | complete | SDK Consumer Hardening And Walkthrough | Public SDK integration proof, walkthrough, regression suite, final polish | `FS-00`, `FS-01`, `FS-01.1`, `FS-02`, `FS-02.1`, `FS-03`, `FS-04`; should be revisited after `FS-04.1` |
+| `FS-04.2` | pending | Sponsorship Credit And Policy Hardening | Reserve credits before sponsor signing and make package-policy validation fail closed | `FS-01`, `FS-03`, `FS-04`, `FS-04.1` |
+| `FS-05` | complete | SDK Consumer Hardening And Walkthrough | Public SDK integration proof, walkthrough, regression suite, final polish | `FS-00`, `FS-01`, `FS-01.1`, `FS-02`, `FS-02.1`, `FS-03`, `FS-04`; should be revisited after `FS-04.1` and `FS-04.2` |
 
 ## Dependency Map
 
@@ -61,6 +62,11 @@ FS-04 -> FS-04.1
 FS-03 -> FS-04.1
 FS-01 -> FS-04.1
 
+FS-04.1 -> FS-04.2
+FS-04 -> FS-04.2
+FS-03 -> FS-04.2
+FS-01 -> FS-04.2
+
 FS-01.1 -> FS-05
 FS-00 -> FS-05
 FS-01 -> FS-05
@@ -69,6 +75,7 @@ FS-02.1 -> FS-05
 FS-03 -> FS-05
 FS-04 -> FS-05
 FS-04.1 -> FS-05
+FS-04.2 -> FS-05
 ```
 
 ## `FS-00` Workspace Bootstrap
@@ -734,6 +741,100 @@ Bridge the gap between the current hard-coded `say_hello` implementation and the
 - frontend tests for the action registry card and catalog/feed rendering
 - manual Sui testnet smoke test with the reference `say_hello` action
 
+## `FS-04.2` Sponsorship Credit And Policy Hardening
+
+### Objective
+
+Close the remaining MVP sponsorship safety gaps after generic metered actions:
+
+- reserve user credits before the backend sponsor-signs a transaction
+- make transaction-kind policy validation fail closed
+- replace loose package-ID string matching with parsed package-call validation
+
+This work order keeps the MVP policy intentionally simple. It does not introduce a full policy language or app secrets.
+
+### In Scope
+
+- reorder the `execute` flow so credit reservation is committed before sponsor signing
+- release the reservation if sponsor signing fails after the reservation is created
+- reject malformed or unparseable `transactionKindBytes`
+- inspect parsed programmable transaction commands instead of stringifying transaction data
+- require all sponsored Move calls to target the app's registered `packageId`
+- keep existing app-scoped session, enabled-action, allowed-origin, and credit checks intact
+- API tests covering signing-order and fail-closed package validation
+- docs/comments only where needed to explain the sponsorship safety boundary
+
+### Out Of Scope
+
+- adding browser-visible app secrets
+- developer-server execution intents
+- a general sponsorship policy language
+- non-Sui chain support
+- automating Move package publish or `initialize_app`
+- changing the public browser SDK API
+
+### Data Model
+
+- no new model is expected
+- `PendingActionReservation` and `CreditLedgerEntry` remain the reservation and credit-accounting source of truth
+- repository methods may be adjusted if needed so reservation creation can happen before sponsor-sign payloads are available
+
+### Implementation Checklist
+
+- Split the current execute flow so it can:
+  - validate app/session/action/origin/program prerequisites
+  - validate transaction-kind policy
+  - reserve credits
+  - sponsor-sign the transaction
+  - persist sponsor payload and gas lock against the existing reservation
+- Ensure an insufficient-credit request returns before any sponsor-signing attempt.
+- If sponsor signing fails after credit reservation, release or fail the reservation idempotently.
+- Update transaction-kind policy validation to:
+  - decode base64 transaction-kind bytes
+  - parse with the Sui SDK
+  - reject on any parse/decode error
+  - inspect programmable transaction commands
+  - reject any command that is not within the registered package policy
+  - reject transactions with no allowed package call
+- For the reference MVP policy, allow Move calls to the registered `packageId`; if the implementation can cheaply distinguish module/function, also keep `say_hello` constrained to `hello_celeris::say_hello`.
+- Keep backend-owned values backend-owned:
+  - sponsor wallet
+  - gas owner
+  - gas budget
+  - sponsor signature
+- Add tests proving:
+  - insufficient credits does not call the sponsor adapter
+  - malformed transaction-kind bytes are rejected
+  - unparseable transaction-kind bytes are rejected
+  - valid bytes for a transaction outside the registered package are rejected
+  - valid bytes for the registered package can proceed to sponsorship
+  - sponsor-sign failure releases or fails the reservation without burning credits
+
+### Deliverables
+
+- execute flow reserves credits before sponsor signing
+- fail-closed transaction-kind parser
+- package-scoped command validation
+- regression tests for signing order and policy rejection paths
+
+### Acceptance Criteria
+
+- a user with insufficient credits cannot trigger sponsor signing
+- malformed or unparseable `transactionKindBytes` are rejected
+- transaction kinds that do not call the app's registered package are rejected
+- transaction kinds containing calls outside the app's registered package are rejected
+- valid registered-package transactions still execute through the generic action path
+- sponsor-sign failures do not permanently consume user credits
+- `npm run typecheck` passes
+- `npm test` passes
+
+### Verification
+
+- API tests for credit reservation before sponsor signing
+- API tests for malformed, unparseable, wrong-package, mixed-package, and valid-package transaction kinds
+- integration test or service test proving sponsor adapter is not called on insufficient credits
+- manual smoke test with the reference `say_hello` transaction after the policy change
+
 ## `FS-05` SDK Consumer Hardening And Walkthrough
 
 ### Objective
@@ -808,7 +909,7 @@ Turn the reference implementation into a clean developer-integration demo, lock 
 
 The full fresh-start implementation is complete only when:
 
-- all eight work orders are complete, including `FS-04.1`
+- all nine work orders are complete, including `FS-04.1` and `FS-04.2`
 - a brand new app can be created in Celeris
 - the developer dashboard lives on the app origin while the reference consumer app lives on the demo origin
 - the developer dashboard signs in through shared auth as a reserved first-party client identity
