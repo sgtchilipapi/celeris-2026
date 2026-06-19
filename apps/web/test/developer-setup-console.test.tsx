@@ -450,6 +450,9 @@ describe("DeveloperSetupConsole", () => {
 
     const actionNameInput = await screen.findByLabelText("Action name");
     expect(actionNameInput).toHaveValue("say_hello");
+    await waitFor(() => {
+      expect(screen.getByLabelText("Credit usage")).toHaveValue(5);
+    });
 
     fireEvent.change(screen.getByLabelText("Credit usage"), {
       target: {
@@ -474,7 +477,14 @@ describe("DeveloperSetupConsole", () => {
 
     await screen.findByText("Updated say_hello action.");
     expect(screen.getByText("say_hello")).toBeInTheDocument();
-    expect(screen.getByText("7 credits per use")).toBeInTheDocument();
-    expect(screen.getByText("Disabled")).toBeInTheDocument();
+    expect(screen.getByText("cost: 7 credits")).toBeInTheDocument();
+    expect(screen.getByText("disabled")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "say_hello, cost: 7 credits, disabled" }));
+
+    expect(screen.getByLabelText("Action name")).toHaveValue("say_hello");
+    expect(screen.getByLabelText("Credit usage")).toHaveValue(7);
+    expect(screen.getByLabelText("Enabled")).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Update" })).toBeInTheDocument();
   });
 });

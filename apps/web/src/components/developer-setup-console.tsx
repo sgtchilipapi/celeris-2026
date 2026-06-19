@@ -115,6 +115,7 @@ export function DeveloperSetupConsole({
     priceCredits: "",
     isEnabled: true
   });
+  const [selectedActionType, setSelectedActionType] = useState<string | null>(null);
   const [creditsPricingForm, setCreditsPricingForm] = useState<CreditsPricingFormState>({
     creditsPerUsd: ""
   });
@@ -137,6 +138,10 @@ export function DeveloperSetupConsole({
         ? [selectedApp.sayHelloAction]
         : [];
   }, [selectedApp]);
+  const selectedConfiguredAction = useMemo(
+    () => configuredActions.find((action) => action.actionType === selectedActionType) ?? null,
+    [configuredActions, selectedActionType]
+  );
 
   useEffect(() => {
     const storedToken =
@@ -166,14 +171,18 @@ export function DeveloperSetupConsole({
       packageId: selectedApp.registeredProgram?.packageId ?? ""
     });
     setActionForm({
-      actionName: selectedApp.sayHelloAction?.actionType ?? CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
-      priceCredits: selectedApp.sayHelloAction ? String(selectedApp.sayHelloAction.priceCredits) : "5",
-      isEnabled: selectedApp.sayHelloAction?.isEnabled ?? true
+      actionName: selectedConfiguredAction?.actionType ?? CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
+      priceCredits: selectedConfiguredAction ? String(selectedConfiguredAction.priceCredits) : "5",
+      isEnabled: selectedConfiguredAction?.isEnabled ?? true
     });
     setCreditsPricingForm({
       creditsPerUsd: String(selectedApp.creditsPricing.creditsPerUsd)
     });
-  }, [selectedApp]);
+  }, [selectedApp, selectedConfiguredAction]);
+
+  useEffect(() => {
+    setSelectedActionType(null);
+  }, [selectedAppId]);
 
   async function request<T>(path: string, init: RequestInit, parser: { parse: (value: unknown) => T }) {
     const response = await fetch(new URL(path, apiOrigin), {
@@ -424,6 +433,15 @@ export function DeveloperSetupConsole({
     }
   }
 
+  function selectConfiguredAction(action: (typeof configuredActions)[number]) {
+    setSelectedActionType(action.actionType);
+    setActionForm({
+      actionName: action.actionType,
+      priceCredits: String(action.priceCredits),
+      isEnabled: action.isEnabled
+    });
+  }
+
   async function handleConfigureCreditsPricing(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -614,7 +632,7 @@ export function DeveloperSetupConsole({
                   </div>
                 </dl>
 
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_18rem]">
+                <div className="grid gap-5">
                   <form className="grid gap-3" onSubmit={handleRegisterProgram}>
                     <div>
                       <h3 className="text-base font-semibold">Deployed Sui package</h3>
@@ -703,7 +721,7 @@ export function DeveloperSetupConsole({
                       />
                     </Label>
                     <Button className="self-end" disabled={isBusy} type="submit">
-                      Create Action
+                      {selectedConfiguredAction ? "Update" : "Create Action"}
                     </Button>
                   </form>
                 </div>
@@ -711,13 +729,18 @@ export function DeveloperSetupConsole({
                   <h3 className="text-base font-semibold">Configured actions</h3>
                   {configuredActions.length > 0 ? (
                     configuredActions.map((action) => (
-                      <div className="list-row rounded-md" role="listitem" key={action.actionType}>
-                        <div>
-                          <span>{action.actionType}</span>
-                          <small>{action.priceCredits} credits per use</small>
-                        </div>
-                        <small>{action.isEnabled ? "Enabled" : "Disabled"}</small>
-                      </div>
+                      <button
+                        aria-label={`${action.actionType}, cost: ${action.priceCredits} credits, ${action.isEnabled ? "enabled" : "disabled"}`}
+                        aria-pressed={selectedActionType === action.actionType}
+                        className={`list-row action-list-row rounded-md${selectedActionType === action.actionType ? " selected" : ""}`}
+                        key={action.actionType}
+                        onClick={() => selectConfiguredAction(action)}
+                        type="button"
+                      >
+                        <span>{action.actionType}</span>
+                        <span>cost: {action.priceCredits} credits</span>
+                        <span>{action.isEnabled ? "enabled" : "disabled"}</span>
+                      </button>
                     ))
                   ) : (
                     <p className="empty-state">No user actions configured yet.</p>
