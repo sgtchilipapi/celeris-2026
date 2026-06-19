@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   transpilePackages: ["@celeris/shared", "@celeris/sdk-browser"],
   allowedDevOrigins: [
-    originHost(process.env.NEXT_PUBLIC_SITE_ORIGIN, "https://celeris.pro"),
+    originHost(process.env.NEXT_PUBLIC_SITE_ORIGIN, "https://home.celeris.pro"),
     originHost(process.env.NEXT_PUBLIC_DEVELOPER_APP_ORIGIN, "https://app.celeris.pro"),
     originHost(process.env.NEXT_PUBLIC_DEMO_FRONTEND_ORIGIN, "https://demo.celeris.pro"),
     originHost(process.env.NEXT_PUBLIC_HOSTED_AUTH_ORIGIN, "https://auth.celeris.pro")

@@ -4,7 +4,7 @@ set -euo pipefail
 
 API_PORT="${API_PORT:-4100}"
 WEB_PORT="${WEB_PORT:-3101}"
-PUBLIC_SITE_ORIGIN="${CELERIS_PUBLIC_SITE_ORIGIN:-https://celeris.pro}"
+PUBLIC_SITE_ORIGIN="${CELERIS_PUBLIC_SITE_ORIGIN:-https://home.celeris.pro}"
 DEVELOPER_APP_ORIGIN="${CELERIS_DEVELOPER_APP_ORIGIN:-https://app.celeris.pro}"
 DEMO_FRONTEND_ORIGIN="${CELERIS_DEMO_FRONTEND_ORIGIN:-https://demo.celeris.pro}"
 AUTH_ORIGIN="${CELERIS_HOSTED_AUTH_ORIGIN:-https://auth.celeris.pro}"
