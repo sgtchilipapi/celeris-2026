@@ -15,19 +15,18 @@ import { Card, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 
-const DEMO_APP_ID = "cmqmktkm7000b8gp8co60f0ob";
 const HELLO_CELERIS_APP_STATE_OBJECT_ID = "0xda981bd16f6692d4884c6b682c6ef51851b4f2beae6e3f6992e79135fbd72180";
 
-const DEMO_REDIRECT_URI = "https://demo.celeris.pro/auth/callback";
-const DEMO_CHECKOUT_SUCCESS_URL = "https://demo.celeris.pro/?checkout=success";
-const DEMO_CHECKOUT_CANCEL_URL = "https://demo.celeris.pro/?checkout=canceled";
 const DEMO_SUI_RPC_ORIGIN = "https://fullnode.testnet.sui.io:443";
 const HELLO_CELERIS_PACKAGE_ID = "0x35b7d650cb0f5f45fcc651e65dc903ae9342e6d3c49a09ab4a6ed27861a8439f";
 
-const DEMO_FRONTEND_ORIGIN = "https://demo.celeris.pro";
-
-
 const demoAppIdStorageKey = "celeris.demo.appId";
+
+interface DemoConsumerShellProps {
+  appId: string;
+  demoOrigin: string;
+  suiRpcOrigin?: string;
+}
 
 function toSuiScanTestnetTxUrl(digest: string) {
   return `https://suiscan.xyz/testnet/tx/${encodeURIComponent(digest)}`;
@@ -37,7 +36,7 @@ function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Request failed";
 }
 
-export function DemoConsumerShell() {
+export function DemoConsumerShell({ appId, demoOrigin, suiRpcOrigin = DEMO_SUI_RPC_ORIGIN }: DemoConsumerShellProps) {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [catalog, setCatalog] = useState<AppCatalog | null>(null);
   const [balance, setBalance] = useState<AppBalance | null>(null);
@@ -50,14 +49,14 @@ export function DemoConsumerShell() {
   const [transactions, setTransactions] = useState<AppTransactionRecord[]>([]);
 
   const client = useCelerisBrowserClient({
-    appId: DEMO_APP_ID,
-    suiRpcOrigin: DEMO_SUI_RPC_ORIGIN,
-    redirectUri: DEMO_REDIRECT_URI
+    appId,
+    suiRpcOrigin,
+    redirectUri: new URL("/auth/callback", demoOrigin).toString()
   });
 
   useEffect(() => {
-    window.sessionStorage.setItem(demoAppIdStorageKey, DEMO_APP_ID);
-  }, []);
+    window.sessionStorage.setItem(demoAppIdStorageKey, appId);
+  }, [appId]);
 
   useEffect(() => {
     if (!client) {
@@ -99,7 +98,7 @@ export function DemoConsumerShell() {
     setErrorMessage(null);
 
     try {
-      window.sessionStorage.setItem(demoAppIdStorageKey, DEMO_APP_ID);
+      window.sessionStorage.setItem(demoAppIdStorageKey, appId);
       await client.auth.startLogin();
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
@@ -142,8 +141,8 @@ export function DemoConsumerShell() {
     try {
       await client.credits.startCheckout({
         usdAmount: checkoutUsdAmount,
-        successRedirectUrl: DEMO_CHECKOUT_SUCCESS_URL,
-        cancelRedirectUrl: DEMO_CHECKOUT_CANCEL_URL
+        successRedirectUrl: new URL("/?checkout=success", demoOrigin).toString(),
+        cancelRedirectUrl: new URL("/?checkout=canceled", demoOrigin).toString()
       });
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
@@ -207,7 +206,7 @@ export function DemoConsumerShell() {
           <dl className="runtime-grid">
             <div>
               <dt>App ID</dt>
-              <dd>{DEMO_APP_ID}</dd>
+              <dd>{appId}</dd>
             </div>
             <div>
               <dt>Package</dt>
@@ -231,7 +230,7 @@ export function DemoConsumerShell() {
                 Sign out
               </Button>
             ) : (
-              <Button disabled={isBusy || !DEMO_APP_ID} onClick={handleSignIn} type="button">
+              <Button disabled={isBusy || !appId} onClick={handleSignIn} type="button">
                 Sign in
               </Button>
             )}

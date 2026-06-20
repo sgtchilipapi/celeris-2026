@@ -27,7 +27,13 @@ export default async function SurfaceRootPage() {
   }
 
   if (surface === "demo") {
-    return <DemoConsumerShell />;
+    return (
+      <DemoConsumerShell
+        appId={config.NEXT_PUBLIC_DEMO_APP_ID}
+        demoOrigin={config.NEXT_PUBLIC_DEMO_FRONTEND_ORIGIN}
+        suiRpcOrigin={config.NEXT_PUBLIC_SUI_RPC_ORIGIN}
+      />
+    );
   }
 
   if (surface === "hosted-auth") {

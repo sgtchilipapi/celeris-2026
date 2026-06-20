@@ -130,7 +130,7 @@ describe("DemoConsumerShell", () => {
         )
       );
 
-    render(<DemoConsumerShell />);
+    render(<DemoConsumerShell appId={demoAppId} demoOrigin="https://demo.celeris.pro" />);
 
     await waitFor(() => {
       expect(screen.getByText("user@example.com")).toBeInTheDocument();
