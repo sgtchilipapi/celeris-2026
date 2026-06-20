@@ -6,6 +6,7 @@ import {
   CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
   type ConfigureManagedActionInput,
   type ConfigureCreditsPricingInput,
+  configureAllowedOriginsSchema,
   configureCreditsPricingSchema,
   configureManagedActionSchema,
   type CreateDeveloperAppInput,
@@ -49,6 +50,19 @@ interface CreditsPricingFormState {
   creditsPerUsd: string;
 }
 
+function normalizeOriginInput(value: string) {
+  return new URL(value.trim()).origin;
+}
+
+function formatIntegerWithCommas(value: string | number) {
+  const digits = String(value).replace(/\D/gu, "");
+  return digits ? Number(digits).toLocaleString("en-US") : "";
+}
+
+function parseFormattedInteger(value: string) {
+  return Number(value.replace(/,/gu, ""));
+}
+
 function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Request failed";
 }
@@ -65,6 +79,20 @@ function shortenWalletAddress(walletAddress: string) {
   }
 
   return `${normalized.slice(0, 6)}...${normalized.slice(-6)}`;
+}
+
+function formatSuiBalance(balanceMist: string | null | undefined) {
+  if (!balanceMist) {
+    return "Balance unavailable";
+  }
+
+  const mistPerSui = 1_000_000_000n;
+  const mist = BigInt(balanceMist);
+  const wholeSui = mist / mistPerSui;
+  const fractionalMist = mist % mistPerSui;
+  const fractional = fractionalMist.toString().padStart(9, "0").replace(/0+$/u, "");
+
+  return `${wholeSui.toLocaleString("en-US")}${fractional ? `.${fractional}` : ""} SUI`;
 }
 
 function shortenValue(value: string) {
@@ -110,6 +138,7 @@ export function DeveloperSetupConsole({
   const [programForm, setProgramForm] = useState<ProgramFormState>({
     packageId: ""
   });
+  const [allowedOriginsInput, setAllowedOriginsInput] = useState("");
   const [actionForm, setActionForm] = useState<ActionFormState>({
     actionName: CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
     priceCredits: "",
@@ -170,13 +199,14 @@ export function DeveloperSetupConsole({
     setProgramForm({
       packageId: selectedApp.registeredProgram?.packageId ?? ""
     });
+    setAllowedOriginsInput("");
     setActionForm({
       actionName: selectedConfiguredAction?.actionType ?? CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
       priceCredits: selectedConfiguredAction ? String(selectedConfiguredAction.priceCredits) : "5",
       isEnabled: selectedConfiguredAction?.isEnabled ?? true
     });
     setCreditsPricingForm({
-      creditsPerUsd: String(selectedApp.creditsPricing.creditsPerUsd)
+      creditsPerUsd: formatIntegerWithCommas(selectedApp.creditsPricing.creditsPerUsd)
     });
   }, [selectedApp, selectedConfiguredAction]);
 
@@ -326,6 +356,7 @@ export function DeveloperSetupConsole({
 
       updateSelectedApp(response.app);
       setStatusMessage(`Created app ${response.app.name}.`);
+      setNewAppName("");
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     } finally {
@@ -400,6 +431,59 @@ export function DeveloperSetupConsole({
     }
   }
 
+  async function saveAllowedOrigins(nextAllowedOrigins: string[]) {
+    if (!selectedApp) {
+      return;
+    }
+
+    setIsBusy(true);
+    setErrorMessage(null);
+
+    try {
+      const payload = configureAllowedOriginsSchema.parse({
+        allowedOrigins: nextAllowedOrigins
+      });
+      const response = await request(
+        `/v1/developer/apps/${selectedApp.appId}/allowed-origins`,
+        {
+          method: "PUT",
+          body: JSON.stringify(payload)
+        },
+        developerAppResponseSchema
+      );
+      updateSelectedApp(response.app);
+      setStatusMessage("Updated allowed origins.");
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function handleAddAllowedOrigin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedApp) {
+      return;
+    }
+
+    try {
+      const origin = normalizeOriginInput(allowedOriginsInput);
+      await saveAllowedOrigins(Array.from(new Set([...selectedApp.allowedOrigins, origin])));
+      setAllowedOriginsInput("");
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    }
+  }
+
+  async function handleRemoveAllowedOrigin(origin: string) {
+    if (!selectedApp) {
+      return;
+    }
+
+    await saveAllowedOrigins(selectedApp.allowedOrigins.filter((candidate) => candidate !== origin));
+  }
+
   async function handleConfigureAction(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -454,7 +538,7 @@ export function DeveloperSetupConsole({
 
     try {
       const payload: ConfigureCreditsPricingInput = configureCreditsPricingSchema.parse({
-        creditsPerUsd: Number(creditsPricingForm.creditsPerUsd)
+        creditsPerUsd: parseFormattedInteger(creditsPricingForm.creditsPerUsd)
       });
       await request(
         `/v1/developer/apps/${selectedApp.appId}/credits-pricing`,
@@ -485,7 +569,7 @@ export function DeveloperSetupConsole({
 
   function updateCreditsPricingField(event: ChangeEvent<HTMLInputElement>) {
     setCreditsPricingForm({
-      creditsPerUsd: event.target.value
+      creditsPerUsd: formatIntegerWithCommas(event.target.value)
     });
   }
 
@@ -628,43 +712,95 @@ export function DeveloperSetupConsole({
                           Copy
                         </Button>
                       ) : null}
+                      {selectedApp.sponsorWallet?.address ? (
+                        <span className="shrink-0 text-xs font-medium text-[#55635d]" aria-label="Sponsor wallet SUI balance">
+                          {formatSuiBalance(selectedApp.sponsorWallet.suiBalanceMist)}
+                        </span>
+                      ) : null}
                     </dd>
                   </div>
                 </dl>
 
                 <div className="grid gap-5">
-                  <form className="grid gap-3" onSubmit={handleRegisterProgram}>
-                    <div>
-                      <h3 className="text-base font-semibold">Deployed Sui package</h3>
-                      <p className="mt-1 text-sm text-[#55635d]">Register the package used by sponsored actions.</p>
-                    </div>
-                    <Label>
-                      <span>Package ID</span>
-                      <Input onChange={updateProgramField("packageId")} type="text" value={programForm.packageId} />
-                    </Label>
-                    <Button className="justify-self-start" disabled={isBusy} type="submit">
-                      Save package ID
-                    </Button>
-                  </form>
+                  <dl className="grid gap-3 rounded-md border border-[rgba(23,34,31,0.12)] bg-white/55 p-4 md:grid-cols-1">
+                    <form className="grid gap-3" onSubmit={handleRegisterProgram}>
+                      <div>
+                        <h3 className="text-base font-semibold">Deployed Sui package</h3>
+                        <p className="mt-1 text-sm text-[#55635d]">Register the package used by sponsored actions.</p>
+                      </div>
+                      <Label>
+                        <span>Package ID</span>
+                        <Input onChange={updateProgramField("packageId")} type="text" value={programForm.packageId} />
+                      </Label>
+                      <Button className="justify-self-start" disabled={isBusy} type="submit">
+                        Save package ID
+                      </Button>
+                    </form>
+                  </dl>
 
-                  <form id="credits-pricing-form" className="grid content-start gap-3 rounded-md border border-[rgba(23,34,31,0.12)] bg-white/55 p-4" onSubmit={handleConfigureCreditsPricing}>
-                    <div>
-                      <h3 className="text-base font-semibold">Credits Pricing</h3>
+                  <dl className="grid gap-3 rounded-md border border-[rgba(23,34,31,0.12)] bg-white/55 p-4 md:grid-cols-1">
+                    <div className="grid gap-3">
+                      <div>
+                        <h3 className="text-base font-semibold">Allowed Origins</h3>
+                      </div>
+                      {selectedApp.allowedOrigins.length > 0 ? (
+                        <div className="flex flex-wrap gap-2" aria-label="Saved allowed origins">
+                          {selectedApp.allowedOrigins.map((origin) => (
+                            <span
+                              className="inline-flex max-w-full items-center gap-2 rounded-md border border-[rgba(23,34,31,0.12)] bg-white/75 px-2.5 py-1 text-sm"
+                              key={origin}
+                            >
+                              <span className="min-w-0 break-all">{origin}</span>
+                              <button
+                                aria-label={`Remove origin ${origin}`}
+                                className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-base leading-none text-[#55635d] hover:bg-[rgba(23,34,31,0.08)] hover:text-[#17221f] disabled:opacity-50"
+                                disabled={isBusy}
+                                onClick={() => void handleRemoveAllowedOrigin(origin)}
+                                type="button"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      <form className="grid gap-3" onSubmit={handleAddAllowedOrigin}>
+                        <Label>
+                          <span>Add in the domain/s of your dApp (ex: https://demo.celeris.pro).</span>
+                          <Input
+                            name="allowedOrigin"
+                            onChange={(event) => setAllowedOriginsInput(event.target.value)}
+                            type="url"
+                            value={allowedOriginsInput}
+                          />
+                        </Label>
+                        <Button className="justify-self-start" disabled={isBusy} type="submit">
+                          Add Origin
+                        </Button>
+                      </form>
                     </div>
-                    <Label>
-                      <span>Credits per 1$</span>
-                      <Input
-                        min={1}
-                        onChange={updateCreditsPricingField}
-                        step={1}
-                        type="number"
-                        value={creditsPricingForm.creditsPerUsd}
-                      />
-                    </Label>
-                    <Button disabled={isBusy} type="submit">
-                      Save pricing
-                    </Button>
-                  </form>
+                  </dl>
+                  <dl className="grid gap-3 rounded-md border border-[rgba(23,34,31,0.12)] bg-white/55 p-4 md:grid-cols-1">
+                    <form id="credits-pricing-form" className="grid gap-3" onSubmit={handleConfigureCreditsPricing}>
+                      <div>
+                        <h3 className="text-base font-semibold">Credits Pricing</h3>
+                      </div>
+                      <Label>
+                        <span>Credits per 1$</span>
+                        <Input
+                          inputMode="numeric"
+                          min={1}
+                          onChange={updateCreditsPricingField}
+                          pattern="[0-9,]*"
+                          type="text"
+                          value={creditsPricingForm.creditsPerUsd}
+                        />
+                      </Label>
+                      <Button className="justify-self-start" disabled={isBusy} type="submit">
+                        Save pricing
+                      </Button>
+                    </form>
+                  </dl>
                 </div>
               </>
             ) : (
@@ -730,16 +866,17 @@ export function DeveloperSetupConsole({
                   {configuredActions.length > 0 ? (
                     configuredActions.map((action) => (
                       <button
-                        aria-label={`${action.actionType}, cost: ${action.priceCredits} credits, ${action.isEnabled ? "enabled" : "disabled"}`}
                         aria-pressed={selectedActionType === action.actionType}
                         className={`list-row action-list-row rounded-md${selectedActionType === action.actionType ? " selected" : ""}`}
                         key={action.actionType}
                         onClick={() => selectConfiguredAction(action)}
                         type="button"
                       >
-                        <span>{action.actionType}</span>
-                        <span>cost: {action.priceCredits} credits</span>
-                        <span>{action.isEnabled ? "enabled" : "disabled"}</span>
+                        <div>
+                          <span>{action.actionType}</span>
+                          <small>  cost: {action.priceCredits} credits</small>
+                        </div>
+                        <small>{action.isEnabled ? "Enabled" : "Disabled"}</small>
                       </button>
                     ))
                   ) : (

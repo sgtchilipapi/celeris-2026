@@ -137,10 +137,18 @@ export const createDeveloperAppSchema = z.object({
     .optional()
 });
 
+export const configureAllowedOriginsSchema = z.object({
+  allowedOrigins: z
+    .array(z.string().url())
+    .min(1, "allowedOrigins must include at least one origin")
+    .max(10, "allowedOrigins must include at most 10 origins")
+});
+
 export const sponsorWalletSchema = z.object({
   chainFamily: z.literal(CELERIS_CHAIN_FAMILY_SUI),
   network: z.literal(CELERIS_NETWORK_TESTNET),
   address: suiAddressSchema,
+  suiBalanceMist: z.string().regex(/^\d+$/u).nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()
 });
@@ -419,6 +427,7 @@ export type AuthLoginCompletionInput = z.infer<typeof authLoginCompletionSchema>
 export type AuthTokenExchangeInput = z.infer<typeof authTokenExchangeSchema>;
 export type AuthSession = z.infer<typeof authSessionSchema>;
 export type CreateDeveloperAppInput = z.infer<typeof createDeveloperAppSchema>;
+export type ConfigureAllowedOriginsInput = z.infer<typeof configureAllowedOriginsSchema>;
 export type DeveloperApp = z.infer<typeof developerAppSchema>;
 export type SponsorWallet = z.infer<typeof sponsorWalletSchema>;
 export type RegisteredProgram = z.infer<typeof registeredProgramSchema>;

@@ -240,6 +240,16 @@ export function createDeveloperRouter(options?: DeveloperRouterOptions) {
     res.status(200).json({ actions });
   });
 
+  router.put("/v1/developer/apps/:appId/allowed-origins", developerAuth, async (req, res) => {
+    const developerProfile = res.locals.developerProfile as { id: string };
+    const app = await resolveService().configureAllowedOrigins(
+      developerProfile.id,
+      requireRouteParam(req.params.appId, "appId"),
+      req.body
+    );
+    res.status(200).json({ app });
+  });
+
   router.put("/v1/developer/apps/:appId/actions/:actionType", developerAuth, async (req, res) => {
     const developerProfile = res.locals.developerProfile as { id: string };
     const action = await resolveService().configureAction(

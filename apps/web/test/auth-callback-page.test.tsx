@@ -43,8 +43,6 @@ describe("AuthCallbackPage", () => {
     await waitFor(() => {
       expect(sdkMocks.createCelerisBrowserClientMock).toHaveBeenCalledWith({
         appId: "app_123",
-        apiOrigin: "https://api.celeris.pro",
-        hostedAuthOrigin: "https://auth.celeris.pro",
         redirectUri: "https://demo.celeris.pro/auth/callback"
       });
     });

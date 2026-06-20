@@ -17,6 +17,8 @@ import {
   authProviderSchema,
   authTokenExchangeSchema,
   chainIdSchema,
+  type ConfigureAllowedOriginsInput,
+  configureAllowedOriginsSchema,
   type ConfigureSayHelloInput,
   type ConfigureManagedActionInput,
   configureManagedActionSchema,
@@ -112,6 +114,7 @@ export interface SponsoredTransactionPayload {
 }
 
 export interface SuiSponsorAdapter {
+  getSponsorWalletBalance(input: { address: string }): Promise<{ totalBalanceMist: string }>;
   createSponsoredAction(input: {
     transactionKindBytes: string;
     userWalletAddress: string;
@@ -170,11 +173,20 @@ function toRuntimeConfig(options: Pick<DeveloperSetupServiceOptions, "apiOrigin"
   };
 }
 
-function toSponsorWallet(record: SponsorWalletRecord) {
+async function toSponsorWallet(record: SponsorWalletRecord, suiSponsorAdapter: SuiSponsorAdapter) {
+  let suiBalanceMist: string | null = null;
+
+  try {
+    suiBalanceMist = (await suiSponsorAdapter.getSponsorWalletBalance({ address: record.address })).totalBalanceMist;
+  } catch {
+    suiBalanceMist = null;
+  }
+
   return {
     chainFamily: CELERIS_CHAIN_FAMILY_SUI,
     network: CELERIS_NETWORK_TESTNET,
     address: record.address,
+    suiBalanceMist,
     createdAt: toIsoString(record.createdAt),
     updatedAt: toIsoString(record.updatedAt)
   };
@@ -215,10 +227,11 @@ function toCatalogAction(record: ManagedActionRecord) {
   };
 }
 
-function toDeveloperApp(
+async function toDeveloperApp(
   aggregate: DeveloperAppAggregateRecord,
-  runtimeConfig: Pick<DeveloperSetupServiceOptions, "apiOrigin" | "hostedAuthOrigin" | "demoFrontendOrigin">
-): DeveloperApp {
+  runtimeConfig: Pick<DeveloperSetupServiceOptions, "apiOrigin" | "hostedAuthOrigin" | "demoFrontendOrigin">,
+  suiSponsorAdapter: SuiSponsorAdapter
+): Promise<DeveloperApp> {
   return {
     appId: aggregate.app.id,
     name: aggregate.app.name,
@@ -228,7 +241,7 @@ function toDeveloperApp(
     allowedOrigins: normalizeAllowedOrigins(aggregate.app.allowedOrigins),
     createdAt: toIsoString(aggregate.app.createdAt),
     updatedAt: toIsoString(aggregate.app.updatedAt),
-    sponsorWallet: aggregate.sponsorWallet ? toSponsorWallet(aggregate.sponsorWallet) : null,
+    sponsorWallet: aggregate.sponsorWallet ? await toSponsorWallet(aggregate.sponsorWallet, suiSponsorAdapter) : null,
     registeredProgram: aggregate.registeredProgram ? toRegisteredProgram(aggregate.registeredProgram) : null,
     actions: aggregate.actions.map(toManagedAction),
     sayHelloAction: aggregate.sayHelloAction ? toManagedAction(aggregate.sayHelloAction) : null,
@@ -334,6 +347,16 @@ class RuntimeSuiSponsorAdapter implements SuiSponsorAdapter {
     this.client = new SuiClient({
       url: suiRpcOrigin
     });
+  }
+
+  async getSponsorWalletBalance(input: { address: string }) {
+    const balance = await this.client.getBalance({
+      owner: input.address
+    });
+
+    return {
+      totalBalanceMist: balance.totalBalance
+    };
   }
 
   async createSponsoredAction(input: {
@@ -908,13 +931,13 @@ export class DeveloperSetupService {
 
   async listApps(developerProfileId: string) {
     const apps = await this.repository.listAppsByDeveloperProfileId(developerProfileId);
-    return apps.map((app) =>
+    return Promise.all(apps.map((app) =>
       toDeveloperApp(app, {
         apiOrigin: this.apiOrigin,
         hostedAuthOrigin: this.hostedAuthOrigin,
         demoFrontendOrigin: this.demoFrontendOrigin
-      })
-    );
+      }, this.suiSponsorAdapter)
+    ));
   }
 
   async createApp(developerProfileId: string, input: CreateDeveloperAppInput) {
@@ -932,7 +955,7 @@ export class DeveloperSetupService {
       apiOrigin: this.apiOrigin,
       hostedAuthOrigin: this.hostedAuthOrigin,
       demoFrontendOrigin: this.demoFrontendOrigin
-    });
+    }, this.suiSponsorAdapter);
   }
 
   async getApp(developerProfileId: string, appId: string) {
@@ -941,7 +964,7 @@ export class DeveloperSetupService {
       apiOrigin: this.apiOrigin,
       hostedAuthOrigin: this.hostedAuthOrigin,
       demoFrontendOrigin: this.demoFrontendOrigin
-    });
+    }, this.suiSponsorAdapter);
   }
 
   async provisionSponsorWallet(developerProfileId: string, appId: string) {
@@ -949,7 +972,7 @@ export class DeveloperSetupService {
     const existing = await this.repository.findSponsorWalletByAppId(appId);
 
     if (existing) {
-      return toSponsorWallet(existing);
+      return toSponsorWallet(existing, this.suiSponsorAdapter);
     }
 
     const keypair = Ed25519Keypair.generate();
@@ -959,7 +982,7 @@ export class DeveloperSetupService {
       encryptedSecret: encryptSecret(keypair.getSecretKey(), this.encryptionKey)
     });
 
-    return toSponsorWallet(wallet);
+    return toSponsorWallet(wallet, this.suiSponsorAdapter);
   }
 
   async getSponsorWallet(developerProfileId: string, appId: string) {
@@ -970,7 +993,7 @@ export class DeveloperSetupService {
       throw notFound("Sponsor wallet not found");
     }
 
-    return toSponsorWallet(wallet);
+    return toSponsorWallet(wallet, this.suiSponsorAdapter);
   }
 
   async registerProgram(developerProfileId: string, appId: string, input: RegisterProgramInput) {
@@ -1021,6 +1044,25 @@ export class DeveloperSetupService {
   async listActions(developerProfileId: string, appId: string) {
     await this.requireApp(developerProfileId, appId);
     return (await this.repository.listManagedActions(appId)).map(toManagedAction);
+  }
+
+  async configureAllowedOrigins(developerProfileId: string, appId: string, input: ConfigureAllowedOriginsInput) {
+    await this.requireApp(developerProfileId, appId);
+    const payload = configureAllowedOriginsSchema.parse(input);
+    const app = await this.repository.updateAppAllowedOrigins({
+      appId,
+      allowedOrigins: normalizeAllowedOrigins(payload.allowedOrigins)
+    });
+
+    if (!app) {
+      throw notFound("App not found");
+    }
+
+    return toDeveloperApp(app, {
+      apiOrigin: this.apiOrigin,
+      hostedAuthOrigin: this.hostedAuthOrigin,
+      demoFrontendOrigin: this.demoFrontendOrigin
+    }, this.suiSponsorAdapter);
   }
 
   async configureCreditsPricing(developerProfileId: string, appId: string, input: ConfigureCreditsPricingInput) {

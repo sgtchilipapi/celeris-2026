@@ -32,8 +32,6 @@ export default function AuthCallbackPage() {
 
           const client = createCelerisBrowserClient({
             appId,
-            apiOrigin: config.NEXT_PUBLIC_API_ORIGIN,
-            hostedAuthOrigin: config.NEXT_PUBLIC_HOSTED_AUTH_ORIGIN,
             redirectUri: new URL("/auth/callback", config.NEXT_PUBLIC_DEMO_FRONTEND_ORIGIN).toString()
           });
 
@@ -64,8 +62,7 @@ export default function AuthCallbackPage() {
   }, [
     config.NEXT_PUBLIC_API_ORIGIN,
     config.NEXT_PUBLIC_DEMO_FRONTEND_ORIGIN,
-    config.NEXT_PUBLIC_DEVELOPER_APP_ORIGIN,
-    config.NEXT_PUBLIC_HOSTED_AUTH_ORIGIN
+    config.NEXT_PUBLIC_DEVELOPER_APP_ORIGIN
   ]);
 
   return (

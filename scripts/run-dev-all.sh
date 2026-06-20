@@ -65,6 +65,35 @@ kill_processes_by_pattern() {
   fi
 }
 
+cleanup_next_dev_lock() {
+  local web_dir="${ROOT_DIR}/apps/web"
+  local lock_file="${web_dir}/.next/dev/lock"
+  local lock_pid
+
+  if [ ! -f "${lock_file}" ]; then
+    return 0
+  fi
+
+  lock_pid="$(node -e "const fs = require('fs'); try { const lock = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); if (Number.isInteger(lock.pid)) console.log(lock.pid); } catch {}" "${lock_file}")"
+
+  if [ -n "${lock_pid}" ] && kill -0 "${lock_pid}" >/dev/null 2>&1; then
+    echo "Stopping previous Next dev server from lock file: ${lock_pid}"
+    kill "${lock_pid}" >/dev/null 2>&1 || true
+    sleep 2
+  fi
+
+  if [ -n "${lock_pid}" ] && kill -0 "${lock_pid}" >/dev/null 2>&1; then
+    echo "Force stopping previous Next dev server from lock file: ${lock_pid}"
+    kill -9 "${lock_pid}" >/dev/null 2>&1 || true
+    sleep 1
+  fi
+
+  if [ -z "${lock_pid}" ] || ! kill -0 "${lock_pid}" >/dev/null 2>&1; then
+    echo "Removing stale Next dev lock at ${lock_file}"
+    rm -f "${lock_file}"
+  fi
+}
+
 stop_previous_deployments() {
   echo "Cleaning up previous local deployments..."
 
@@ -72,7 +101,9 @@ stop_previous_deployments() {
   docker compose -f "${ZKLOGIN_COMPOSE_FILE}" down --remove-orphans >/dev/null 2>&1 || true
   kill_processes_by_port "${API_PORT:-4100}" "API"
   kill_processes_by_port "${WEB_PORT:-3101}" "web"
+  kill_processes_by_port "3100" "legacy web"
   kill_processes_by_port "${ZKLOGIN_PROVER_PORT}" "zkLogin prover"
+  cleanup_next_dev_lock
   kill_processes_by_pattern "cloudflared --no-autoupdate tunnel run --token" "cloudflared tunnel"
 }
 

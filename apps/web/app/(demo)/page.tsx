@@ -27,16 +27,7 @@ export default async function SurfaceRootPage() {
   }
 
   if (surface === "demo") {
-    return (
-      <DemoConsumerShell
-        apiOrigin={config.NEXT_PUBLIC_API_ORIGIN}
-        hostedAuthOrigin={config.NEXT_PUBLIC_HOSTED_AUTH_ORIGIN}
-        demoFrontendOrigin={config.NEXT_PUBLIC_DEMO_FRONTEND_ORIGIN}
-        suiRpcOrigin={config.NEXT_PUBLIC_SUI_RPC_ORIGIN}
-        initialAppId={config.NEXT_PUBLIC_DEMO_APP_ID}
-        initialAppStateObjectId={process.env.HELLO_CELERIS_APP_STATE_OBJECT_ID ?? ""}
-      />
-    );
+    return <DemoConsumerShell />;
   }
 
   if (surface === "hosted-auth") {

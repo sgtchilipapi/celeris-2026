@@ -1,11 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { createCelerisBrowserClient } from "@celeris/sdk-browser";
+import { useEffect, useState } from "react";
+import { useCelerisBrowserClient } from "@celeris/sdk-browser/react";
 
 interface MockCheckoutShellProps {
-  apiOrigin: string;
-  hostedAuthOrigin: string;
   demoFrontendOrigin: string;
   appId: string;
   checkoutSessionId: string;
@@ -16,8 +14,6 @@ function toErrorMessage(error: unknown) {
 }
 
 export function MockCheckoutShell({
-  apiOrigin,
-  hostedAuthOrigin,
   demoFrontendOrigin,
   appId,
   checkoutSessionId
@@ -25,16 +21,10 @@ export function MockCheckoutShell({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isCompleting, setIsCompleting] = useState(false);
 
-  const client = useMemo(
-    () =>
-      createCelerisBrowserClient({
-        appId,
-        apiOrigin,
-        hostedAuthOrigin,
-        redirectUri: new URL("/auth/callback", demoFrontendOrigin).toString()
-      }),
-    [apiOrigin, appId, demoFrontendOrigin, hostedAuthOrigin]
-  );
+  const client = useCelerisBrowserClient({
+    appId,
+    redirectUri: new URL("/auth/callback", demoFrontendOrigin).toString()
+  });
 
   useEffect(() => {
     window.sessionStorage.setItem("celeris.demo.appId", appId);
@@ -45,6 +35,10 @@ export function MockCheckoutShell({
     setErrorMessage(null);
 
     try {
+      if (!client) {
+        throw new Error("Celeris app ID is required.");
+      }
+
       const result = await client.credits.completeCheckout(checkoutSessionId);
       window.location.href = result.checkoutSession.successRedirectUrl;
     } catch (error) {

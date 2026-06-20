@@ -100,6 +100,11 @@ const mockZkLoginProver: ZkLoginProver = {
 };
 
 const mockSuiSponsorAdapter: SuiSponsorAdapter = {
+  async getSponsorWalletBalance() {
+    return {
+      totalBalanceMist: "1230000000"
+    };
+  },
   async createSponsoredAction(input) {
     return {
       transactionBytes: "mock-transaction-bytes",
@@ -1256,6 +1261,31 @@ describe("developer setup routes", () => {
 
     expect(invalidRedirect.statusCode).toBe(400);
     expect(invalidRedirect.json.error).toBe("App consumer redirect URI origin is not allowed for this app");
+
+    const updateOrigins = await requestJson(app, {
+      method: "PUT",
+      url: `/v1/developer/apps/${appId}/allowed-origins`,
+      token: developerToken,
+      body: {
+        allowedOrigins: ["https://updated.example/callback", "http://localhost:3103"]
+      }
+    });
+
+    expect(updateOrigins.statusCode).toBe(200);
+    expect(updateOrigins.json.app.allowedOrigins).toEqual(["http://localhost:3103", "https://updated.example"]);
+
+    const updatedLoginRequest = await requestJson(app, {
+      method: "POST",
+      url: "/v1/auth/login-requests",
+      body: {
+        clientKind: "app_consumer",
+        clientId: appId,
+        appId,
+        redirectUri: "https://updated.example/auth/callback"
+      }
+    });
+
+    expect(updatedLoginRequest.statusCode).toBe(201);
   });
 
   it("uses app allowed origins for app-consumer login requests", async () => {
@@ -1348,7 +1378,9 @@ describe("developer setup routes", () => {
     expect(firstProvision.statusCode).toBe(201);
     expect(secondProvision.statusCode).toBe(201);
     expect(firstProvision.json.sponsorWallet.address).toBe(secondProvision.json.sponsorWallet.address);
+    expect(firstProvision.json.sponsorWallet.suiBalanceMist).toBe("1230000000");
     expect(fetchWallet.json.sponsorWallet.address).toBe(firstProvision.json.sponsorWallet.address);
+    expect(fetchWallet.json.sponsorWallet.suiBalanceMist).toBe("1230000000");
   });
 
   it("rejects malformed Sui IDs during program registration", async () => {

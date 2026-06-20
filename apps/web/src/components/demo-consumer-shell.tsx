@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { createCelerisBrowserClient } from "@celeris/sdk-browser";
+import { useCelerisBrowserClient } from "@celeris/sdk-browser/react";
 import {
   CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO,
   type AppBalance,
@@ -15,61 +15,49 @@ import { Card, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 
+const DEMO_APP_ID = "cmqmktkm7000b8gp8co60f0ob";
+const HELLO_CELERIS_APP_STATE_OBJECT_ID = "0xda981bd16f6692d4884c6b682c6ef51851b4f2beae6e3f6992e79135fbd72180";
+
+const DEMO_REDIRECT_URI = "https://demo.celeris.pro/auth/callback";
+const DEMO_CHECKOUT_SUCCESS_URL = "https://demo.celeris.pro/?checkout=success";
+const DEMO_CHECKOUT_CANCEL_URL = "https://demo.celeris.pro/?checkout=canceled";
+const DEMO_SUI_RPC_ORIGIN = "https://fullnode.testnet.sui.io:443";
+const HELLO_CELERIS_PACKAGE_ID = "0x35b7d650cb0f5f45fcc651e65dc903ae9342e6d3c49a09ab4a6ed27861a8439f";
+
+const DEMO_FRONTEND_ORIGIN = "https://demo.celeris.pro";
+
+
 const demoAppIdStorageKey = "celeris.demo.appId";
 
-interface DemoConsumerShellProps {
-  apiOrigin: string;
-  hostedAuthOrigin: string;
-  demoFrontendOrigin: string;
-  suiRpcOrigin: string;
-  initialAppId?: string;
-  initialAppStateObjectId?: string;
+function toSuiScanTestnetTxUrl(digest: string) {
+  return `https://suiscan.xyz/testnet/tx/${encodeURIComponent(digest)}`;
 }
 
 function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Request failed";
 }
 
-export function DemoConsumerShell({
-  apiOrigin,
-  hostedAuthOrigin,
-  demoFrontendOrigin,
-  suiRpcOrigin,
-  initialAppId = "",
-  initialAppStateObjectId = ""
-}: DemoConsumerShellProps) {
-  const [appId, setAppId] = useState(initialAppId);
+export function DemoConsumerShell() {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [catalog, setCatalog] = useState<AppCatalog | null>(null);
   const [balance, setBalance] = useState<AppBalance | null>(null);
   const [statusMessage, setStatusMessage] = useState("Ready for demo sign-in.");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [isCreditsDialogOpen, setIsCreditsDialogOpen] = useState(false);
   const [checkoutUsdAmount, setCheckoutUsdAmount] = useState(5);
   const [username, setUsername] = useState("");
   const [transactions, setTransactions] = useState<AppTransactionRecord[]>([]);
 
-  const client = useMemo(
-    () =>
-      appId
-        ? createCelerisBrowserClient({
-            appId,
-            apiOrigin,
-            hostedAuthOrigin,
-            suiRpcOrigin,
-            redirectUri: new URL("/auth/callback", demoFrontendOrigin).toString()
-          })
-        : null,
-    [apiOrigin, appId, demoFrontendOrigin, hostedAuthOrigin, suiRpcOrigin]
-  );
+  const client = useCelerisBrowserClient({
+    appId: DEMO_APP_ID,
+    suiRpcOrigin: DEMO_SUI_RPC_ORIGIN,
+    redirectUri: DEMO_REDIRECT_URI
+  });
 
   useEffect(() => {
-    const storedAppId = window.sessionStorage.getItem(demoAppIdStorageKey);
-
-    if (!initialAppId && storedAppId) {
-      setAppId(storedAppId);
-    }
-  }, [initialAppId]);
+    window.sessionStorage.setItem(demoAppIdStorageKey, DEMO_APP_ID);
+  }, []);
 
   useEffect(() => {
     if (!client) {
@@ -101,23 +89,9 @@ export function DemoConsumerShell({
   const sayHelloAction = catalog?.actions.find((action) => action.actionType === CELERIS_MANAGED_ACTION_TYPE_SAY_HELLO) ?? null;
   const enabledActions = catalog?.actions ?? [];
 
-  async function handleAppConfig(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!appId.trim()) {
-      setErrorMessage("App ID is required.");
-      return;
-    }
-
-    window.sessionStorage.setItem(demoAppIdStorageKey, appId.trim());
-    setAppId(appId.trim());
-    setStatusMessage("Demo app config saved.");
-    setErrorMessage(null);
-  }
-
   async function handleSignIn() {
-    if (!client || !appId) {
-      setErrorMessage("Configure an app ID before signing in.");
+    if (!client) {
+      setErrorMessage("Demo app ID is required.");
       return;
     }
 
@@ -125,7 +99,7 @@ export function DemoConsumerShell({
     setErrorMessage(null);
 
     try {
-      window.sessionStorage.setItem(demoAppIdStorageKey, appId);
+      window.sessionStorage.setItem(demoAppIdStorageKey, DEMO_APP_ID);
       await client.auth.startLogin();
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
@@ -168,8 +142,8 @@ export function DemoConsumerShell({
     try {
       await client.credits.startCheckout({
         usdAmount: checkoutUsdAmount,
-        successRedirectUrl: new URL("/?checkout=success", demoFrontendOrigin).toString(),
-        cancelRedirectUrl: new URL("/?checkout=canceled", demoFrontendOrigin).toString()
+        successRedirectUrl: DEMO_CHECKOUT_SUCCESS_URL,
+        cancelRedirectUrl: DEMO_CHECKOUT_CANCEL_URL
       });
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
@@ -185,8 +159,8 @@ export function DemoConsumerShell({
       return;
     }
 
-    if (!initialAppStateObjectId.trim()) {
-      setErrorMessage("HELLO_CELERIS_APP_STATE_OBJECT_ID is required in .env.demo.");
+    if (!HELLO_CELERIS_APP_STATE_OBJECT_ID.trim()) {
+      setErrorMessage("HELLO_CELERIS_APP_STATE_OBJECT_ID is required.");
       return;
     }
 
@@ -194,7 +168,7 @@ export function DemoConsumerShell({
     setErrorMessage(null);
 
     try {
-      const result = await client.actions.sayHello({ appStateObjectId: initialAppStateObjectId, username });
+      const result = await client.actions.sayHello({ appStateObjectId: HELLO_CELERIS_APP_STATE_OBJECT_ID, username });
       setBalance(result.balance);
       setTransactions(await client.transactions.list());
       setStatusMessage(`Submitted ${result.message}`);
@@ -208,56 +182,56 @@ export function DemoConsumerShell({
 
   return (
     <main className="workspace demo-workspace">
-      <Card className="workspace-header">
+      <Card className="workspace-header demo-hero">
         <div>
-          <p className="workspace-kicker">Hello Celeris Demo</p>
-          <h1>Reference consumer app</h1>
-          <p className="workspace-copy">
-            This demo surface uses the public browser SDK against the shared hosted auth contract.
-          </p>
+          <p className="workspace-kicker">DEMO APP USING CELERIS BROWSER-SDK</p>
+          <h1>Hello Celeris!</h1>
+          <p className="workspace-copy">Sign in, buy a few credits, and send one bright hello.</p>
         </div>
-        <dl className="runtime-grid">
-          <div>
-            <dt>Demo origin</dt>
-            <dd>{demoFrontendOrigin}</dd>
-          </div>
-          <div>
-            <dt>Auth origin</dt>
-            <dd>{hostedAuthOrigin}</dd>
-          </div>
-          <div>
-            <dt>API origin</dt>
-            <dd>{apiOrigin}</dd>
-          </div>
-        </dl>
       </Card>
+{/* 
+      <div className="demo-sunfield" aria-hidden="true">
+        <div className="demo-sun" />
+        <div className="demo-cloud demo-cloud-one" />
+        <div className="demo-cloud demo-cloud-two" />
+        <div className="demo-hill demo-hill-back" />
+        <div className="demo-hill demo-hill-front" />
+        <div className="demo-flower demo-flower-one" />
+        <div className="demo-flower demo-flower-two" />
+        <div className="demo-flower demo-flower-three" />
+      </div> */}
 
       <section className="workspace-grid demo-grid">
-        <Card className="workspace-band">
+        {/* <Card className="workspace-band demo-panel">
           <h2>App config</h2>
-          <form className="form-grid" onSubmit={handleAppConfig}>
-            <Label>
-              <span>App ID</span>
-              <Input onChange={(event) => setAppId(event.target.value)} type="text" value={appId} />
-            </Label>
-            <Button type="submit">
-              Use app
-            </Button>
-          </form>
-        </Card>
+          <dl className="runtime-grid">
+            <div>
+              <dt>App ID</dt>
+              <dd>{DEMO_APP_ID}</dd>
+            </div>
+            <div>
+              <dt>Package</dt>
+              <dd>{HELLO_CELERIS_PACKAGE_ID}</dd>
+            </div>
+            <div>
+              <dt>App state</dt>
+              <dd>{HELLO_CELERIS_APP_STATE_OBJECT_ID}</dd>
+            </div>
+          </dl>
+        </Card> */}
 
-        <Card className="workspace-band">
+        <Card className="workspace-band demo-panel">
           <CardHeader>
             <div>
-              <CardTitle>User session</CardTitle>
-              <CardDescription>{statusMessage}</CardDescription>
+              <CardTitle>Hello there!</CardTitle>
+              {/* <CardDescription>{statusMessage}</CardDescription> */}
             </div>
             {session ? (
               <Button variant="secondary" disabled={isBusy} onClick={handleSignOut} type="button">
                 Sign out
               </Button>
             ) : (
-              <Button disabled={isBusy || !appId} onClick={handleSignIn} type="button">
+              <Button disabled={isBusy || !DEMO_APP_ID} onClick={handleSignIn} type="button">
                 Sign in
               </Button>
             )}
@@ -268,71 +242,42 @@ export function DemoConsumerShell({
               <dt>Email</dt>
               <dd>{session?.user.email ?? "Not signed in"}</dd>
             </div>
-            <div>
+            <div className="demo-balance-row">
+              <div>
+                <dt>Credits balance</dt>
+                <dd>{balance ? `${balance.availableCredits} credits` : session ? "Loading" : "Sign in required"}</dd>
+              </div>
+              <button
+                aria-label="Buy credits"
+                className="demo-credit-add-button"
+                disabled={!session}
+                onClick={() => setIsCreditsDialogOpen(true)}
+                type="button"
+              >
+                +
+              </button>
+            </div>
+            {/* <div>
               <dt>Wallet</dt>
               <dd>{session?.user.walletAddress ?? "Not signed in"}</dd>
-            </div>
-            <div>
+            </div> */}
+            {/* <div>
               <dt>Audience</dt>
               <dd>{session ? `${session.clientKind}:${session.clientId}` : "Not signed in"}</dd>
-            </div>
+            </div> */}
           </dl>
         </Card>
 
-        <Card className="workspace-band">
-          <CardHeader>
-            <div>
-              <CardTitle>Credits</CardTitle>
-              <CardDescription>Buy demo credits through hosted mock checkout.</CardDescription>
-            </div>
-          </CardHeader>
-          <dl className="runtime-grid">
-            <div>
-              <dt>Balance</dt>
-              <dd>{balance ? `${balance.availableCredits} credits` : session ? "Loading" : "Sign in required"}</dd>
-            </div>
-            <div>
-              <dt>Credit rate</dt>
-              <dd>{catalog ? `${catalog.creditsPricing.creditsPerUsd} credits per $1` : "Loading"}</dd>
-            </div>
-            <div>
-              <dt>Say hello price</dt>
-              <dd>{sayHelloAction ? `${sayHelloAction.priceCredits} credits` : "Not configured"}</dd>
-            </div>
-            <div>
-              <dt>Configured actions</dt>
-              <dd>{enabledActions.length > 0 ? enabledActions.map((action) => action.actionType).join(", ") : "None"}</dd>
-            </div>
-          </dl>
-          <form className="form-grid compact checkout-form" onSubmit={handleCheckout}>
-            <Label>
-              <span>USD amount</span>
-              <Input
-                min="1"
-                onChange={(event) => setCheckoutUsdAmount(Number(event.target.value))}
-                type="number"
-                value={checkoutUsdAmount}
-              />
-            </Label>
-            <p className="text-sm text-[#55635d]">
-              {catalog ? `${checkoutUsdAmount * catalog.creditsPricing.creditsPerUsd} credits` : "Credits calculate after catalog loads."}
-            </p>
-            <Button disabled={isBusy || !session} type="submit">
-              Buy credits
-            </Button>
-          </form>
-        </Card>
-
-        <Card className="workspace-band">
+        <Card className="workspace-band demo-panel demo-action-panel">
           <CardHeader>
             <div>
               <CardTitle>Say Hello</CardTitle>
-              <CardDescription>Execute the configured sponsored action with demo credits.</CardDescription>
+              {/* <CardDescription>A short name, one sponsored Sui action.</CardDescription> */}
             </div>
           </CardHeader>
           <form className="form-grid compact" onSubmit={handleSayHello}>
             <Label>
-              <span>Username</span>
+              <span>What's your name?</span>
               <Input
                 maxLength={32}
                 onChange={(event) => setUsername(event.target.value)}
@@ -340,23 +285,29 @@ export function DemoConsumerShell({
                 value={username}
               />
             </Label>
-            <Button disabled={isBusy || !session || !sayHelloAction || !initialAppStateObjectId.trim()} type="submit">
+            <Button disabled={isBusy || !session || !sayHelloAction || !HELLO_CELERIS_APP_STATE_OBJECT_ID.trim()} type="submit">
               Say Hello Celeris
             </Button>
           </form>
         </Card>
 
-        <Card className="workspace-band">
+        <Card className="workspace-band demo-panel">
           <CardHeader>
             <div>
               <CardTitle>Feed</CardTitle>
-              <CardDescription>Newest managed transactions for this app.</CardDescription>
+              <CardDescription>Fresh hellos land here.</CardDescription>
             </div>
           </CardHeader>
           <div className="list-stack">
             {transactions.length > 0 ? (
               transactions.map((transaction) => (
-                <a className="list-row" href={transaction.explorerUrl} key={transaction.transactionId}>
+                <a
+                  className="list-row"
+                  href={toSuiScanTestnetTxUrl(transaction.digest)}
+                  key={transaction.transactionId}
+                  rel="noreferrer"
+                  target="_blank"
+                >
                   <strong>{transaction.message ?? transaction.actionType}</strong>
                   <small>{transaction.digest}</small>
                   <small>{transaction.walletAddress}</small>
@@ -370,9 +321,71 @@ export function DemoConsumerShell({
       </section>
 
       {errorMessage ? (
-        <Card className="status-band error">
+        <Card className="status-band error demo-status">
           <p>{errorMessage}</p>
         </Card>
+      ) : null}
+
+      {isCreditsDialogOpen ? (
+        <div className="demo-dialog-backdrop" role="presentation" onMouseDown={() => setIsCreditsDialogOpen(false)}>
+          <Card
+            aria-modal="true"
+            className="workspace-band demo-panel demo-credits-dialog"
+            role="dialog"
+            aria-labelledby="demo-credits-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <CardHeader>
+              <div>
+                <CardTitle id="demo-credits-title">Credits</CardTitle>
+                <CardDescription>Pick a small bundle and keep going.</CardDescription>
+              </div>
+              <button
+                aria-label="Close credits dialog"
+                className="demo-dialog-close"
+                onClick={() => setIsCreditsDialogOpen(false)}
+                type="button"
+              >
+                ×
+              </button>
+            </CardHeader>
+            <dl className="runtime-grid">
+              <div>
+                <dt>Balance</dt>
+                <dd>{balance ? `${balance.availableCredits} credits` : session ? "Loading" : "Sign in required"}</dd>
+              </div>
+              <div>
+                <dt>Credit rate</dt>
+                <dd>{catalog ? `${catalog.creditsPricing.creditsPerUsd} credits per $1` : "Loading"}</dd>
+              </div>
+              {/* <div>
+                <dt>Say hello price</dt>
+                <dd>{sayHelloAction ? `${sayHelloAction.priceCredits} credits` : "Not configured"}</dd>
+              </div>
+              <div>
+                <dt>Configured actions</dt>
+                <dd>{enabledActions.length > 0 ? enabledActions.map((action) => action.actionType).join(", ") : "None"}</dd>
+              </div> */}
+            </dl>
+            <form className="form-grid compact checkout-form" onSubmit={handleCheckout}>
+              <Label>
+                <span>USD amount</span>
+                <Input
+                  min="1"
+                  onChange={(event) => setCheckoutUsdAmount(Number(event.target.value))}
+                  type="number"
+                  value={checkoutUsdAmount}
+                />
+              </Label>
+              <p className="text-sm text-[#55635d]">
+                {catalog ? `${checkoutUsdAmount * catalog.creditsPricing.creditsPerUsd} credits` : "Credits calculate after catalog loads."}
+              </p>
+              <Button disabled={isBusy || !session} type="submit">
+                Buy credits
+              </Button>
+            </form>
+          </Card>
+        </div>
       ) : null}
     </main>
   );

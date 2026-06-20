@@ -72,6 +72,7 @@ describe("DeveloperSetupConsole", () => {
               slug: "hello-celeris-demo-abcd1234",
               allowedChainId: "sui:testnet",
               authProvider: "zklogin",
+              allowedOrigins: ["http://localhost:3102"],
               createdAt: "2026-06-16T00:00:00.000Z",
               updatedAt: "2026-06-16T00:00:00.000Z",
               sponsorWallet: null,
@@ -93,6 +94,43 @@ describe("DeveloperSetupConsole", () => {
           }),
           {
             status: 201,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            app: {
+              appId: "app_1",
+              name: "Hello Celeris Demo",
+              slug: "hello-celeris-demo-abcd1234",
+              allowedChainId: "sui:testnet",
+              authProvider: "zklogin",
+              allowedOrigins: ["https://merchant.example", "http://localhost:3102"],
+              createdAt: "2026-06-16T00:00:00.000Z",
+              updatedAt: "2026-06-16T00:00:00.000Z",
+              sponsorWallet: null,
+              registeredProgram: null,
+              sayHelloAction: null,
+              creditsPricing: {
+                creditsPerUsd: 100,
+                updatedAt: "2026-06-16T00:00:00.000Z"
+              },
+              sdkConfig: {
+                appId: "app_1",
+                allowedChainId: "sui:testnet",
+                authProvider: "zklogin",
+                apiOrigin: "http://localhost:4100",
+                hostedAuthOrigin: "http://localhost:3101",
+                demoOrigin: "http://localhost:3102"
+              }
+            }
+          }),
+          {
+            status: 200,
             headers: {
               "content-type": "application/json"
             }
@@ -131,10 +169,44 @@ describe("DeveloperSetupConsole", () => {
         })
       );
     });
+    const createAppCall = fetchMock.mock.calls.find(([url, init]) => {
+      return String(url) === new URL("/v1/developer/apps", "http://localhost:4100").toString() && init?.method === "POST";
+    });
+    expect(JSON.parse(String(createAppCall?.[1]?.body))).toEqual({
+      name: "Hello Celeris Demo",
+      allowedChainId: "sui:testnet",
+      authProvider: "zklogin"
+    });
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Hello Celeris Demo/ })).toBeInTheDocument();
     });
+
+    const appConfiguration = screen.getByRole("heading", { name: /App configuration/ }).closest("section") as HTMLElement;
+    fireEvent.change(within(appConfiguration).getByLabelText("Add in the domain/s of your dApp (ex: https://demo.celeris.pro)."), {
+      target: {
+        value: "https://merchant.example/app"
+      }
+    });
+    fireEvent.click(within(appConfiguration).getByRole("button", { name: "Add Origin" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        new URL("/v1/developer/apps/app_1/allowed-origins", "http://localhost:4100"),
+        expect.objectContaining({
+          method: "PUT"
+        })
+      );
+    });
+    const updateOriginsCall = fetchMock.mock.calls.find(([url, init]) => {
+      return String(url) === new URL("/v1/developer/apps/app_1/allowed-origins", "http://localhost:4100").toString() && init?.method === "PUT";
+    });
+    expect(JSON.parse(String(updateOriginsCall?.[1]?.body))).toEqual({
+      allowedOrigins: ["http://localhost:3102", "https://merchant.example"]
+    });
+    expect(within(appConfiguration as HTMLElement).getByText("https://merchant.example")).toBeInTheDocument();
+    expect(within(appConfiguration as HTMLElement).getByText("http://localhost:3102")).toBeInTheDocument();
+    expect(within(appConfiguration as HTMLElement).getByRole("button", { name: "Remove origin https://merchant.example" })).toBeInTheDocument();
   });
 
   it("restores the dashboard token from the session cookie when sessionStorage is empty", async () => {
@@ -209,6 +281,101 @@ describe("DeveloperSetupConsole", () => {
     expect(window.sessionStorage.getItem("celeris.fs011.dashboard.token")).toBe("token-cookie");
   });
 
+  it("shows the sponsor wallet SUI balance beside the copy button", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            session: {
+              token: "token-123",
+              expiresAt: "2026-06-30T00:00:00.000Z",
+              clientKind: "developer_dashboard",
+              clientId: "celeris-dashboard",
+              appId: null,
+              user: {
+                id: "user_1",
+                email: "dev@example.com",
+                walletAddress: "0x2c45b9cf7d7c5fc33dbd0a1b5c14fffd7a74ac6f9ed6d7f2d881d7ec8e5a2011"
+              },
+              developerProfile: {
+                id: "profile_1",
+                email: "dev@example.com",
+                displayName: "Developer"
+              },
+              zkLogin: null
+            }
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            apps: [
+              {
+                appId: "app_1",
+                name: "Hello Celeris Demo",
+                slug: "hello-celeris-demo-abcd1234",
+                allowedChainId: "sui:testnet",
+                authProvider: "zklogin",
+                allowedOrigins: ["http://localhost:3102"],
+                createdAt: "2026-06-16T00:00:00.000Z",
+                updatedAt: "2026-06-16T00:00:00.000Z",
+                sponsorWallet: {
+                  chainFamily: "sui",
+                  network: "testnet",
+                  address: "0x3c45b9cf7d7c5fc33dbd0a1b5c14fffd7a74ac6f9ed6d7f2d881d7ec8e5a2011",
+                  suiBalanceMist: "1234567890",
+                  createdAt: "2026-06-16T00:00:00.000Z",
+                  updatedAt: "2026-06-16T00:00:00.000Z"
+                },
+                registeredProgram: null,
+                actions: [],
+                sayHelloAction: null,
+                creditsPricing: {
+                  creditsPerUsd: 100,
+                  updatedAt: "2026-06-16T00:00:00.000Z"
+                },
+                sdkConfig: {
+                  appId: "app_1",
+                  allowedChainId: "sui:testnet",
+                  authProvider: "zklogin",
+                  apiOrigin: "http://localhost:4100",
+                  hostedAuthOrigin: "http://localhost:3101",
+                  demoOrigin: "http://localhost:3102"
+                }
+              }
+            ]
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        )
+      );
+
+    render(
+      <DeveloperSetupConsole
+        apiOrigin="http://localhost:4100"
+        hostedAuthOrigin="http://localhost:3101"
+        developerAppOrigin="http://localhost:3103"
+        demoOrigin="http://localhost:3102"
+      />
+    );
+
+    const balance = await screen.findByLabelText("Sponsor wallet SUI balance");
+
+    expect(screen.getAllByRole("button", { name: "Copy" }).length).toBeGreaterThanOrEqual(2);
+    expect(balance).toHaveTextContent("1.23456789 SUI");
+  });
+
   it("configures app-wide credits purchase pricing through the developer API", async () => {
     const appPayload = {
       appId: "app_1",
@@ -278,7 +445,7 @@ describe("DeveloperSetupConsole", () => {
         new Response(
           JSON.stringify({
             creditsPricing: {
-              creditsPerUsd: 500,
+              creditsPerUsd: 1500,
               updatedAt: "2026-06-16T00:00:00.000Z"
             }
           }),
@@ -296,7 +463,7 @@ describe("DeveloperSetupConsole", () => {
             app: {
               ...appPayload,
               creditsPricing: {
-                creditsPerUsd: 500,
+                creditsPerUsd: 1500,
                 updatedAt: "2026-06-16T00:00:00.000Z"
               }
             }
@@ -319,12 +486,16 @@ describe("DeveloperSetupConsole", () => {
       />
     );
 
-    const creditsPerUsdInput = await screen.findByRole("spinbutton", { name: "Credits per 1$" });
+    const creditsPerUsdInput = await screen.findByRole("textbox", { name: "Credits per 1$" });
+    await waitFor(() => {
+      expect(creditsPerUsdInput).toHaveValue("100");
+    });
     fireEvent.change(creditsPerUsdInput, {
       target: {
-        value: "500"
+        value: "1500"
       }
     });
+    expect(creditsPerUsdInput).toHaveValue("1,500");
     fireEvent.click(screen.getByRole("button", { name: "Save pricing" }));
 
     await waitFor(() => {
@@ -332,7 +503,7 @@ describe("DeveloperSetupConsole", () => {
         new URL("/v1/developer/apps/app_1/credits-pricing", "http://localhost:4100"),
         expect.objectContaining({
           body: JSON.stringify({
-            creditsPerUsd: 500
+            creditsPerUsd: 1500
           }),
           method: "PUT"
         })
@@ -478,9 +649,9 @@ describe("DeveloperSetupConsole", () => {
     await screen.findByText("Updated say_hello action.");
     expect(screen.getByText("say_hello")).toBeInTheDocument();
     expect(screen.getByText("cost: 7 credits")).toBeInTheDocument();
-    expect(screen.getByText("disabled")).toBeInTheDocument();
+    expect(screen.getByText("Disabled")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "say_hello, cost: 7 credits, disabled" }));
+    fireEvent.click(screen.getByRole("button", { name: /say_hello\s*cost: 7 credits Disabled/u }));
 
     expect(screen.getByLabelText("Action name")).toHaveValue("say_hello");
     expect(screen.getByLabelText("Credit usage")).toHaveValue(7);

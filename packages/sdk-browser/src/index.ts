@@ -26,11 +26,12 @@ import { generateNonce, generateRandomness, getExtendedEphemeralPublicKey, getZk
 
 export interface CelerisBrowserClientConfig {
   appId: string;
-  apiOrigin: string;
-  hostedAuthOrigin: string;
   redirectUri: string;
   suiRpcOrigin?: string;
 }
+
+export const CELERIS_BROWSER_SDK_API_ORIGIN = "https://api.celeris.pro";
+export const CELERIS_BROWSER_SDK_HOSTED_AUTH_ORIGIN = "https://auth.celeris.pro";
 
 export interface StartLoginOptions {
   redirect?: boolean;
@@ -98,8 +99,6 @@ const ephemeralStorageKeyPrefix = "celeris.zklogin.ephemeral";
 function normalizeConfig(config: CelerisBrowserClientConfig): CelerisBrowserClientConfig {
   const normalized = {
     appId: config.appId.trim(),
-    apiOrigin: new URL(config.apiOrigin).origin,
-    hostedAuthOrigin: new URL(config.hostedAuthOrigin).origin,
     redirectUri: new URL(config.redirectUri).toString(),
     suiRpcOrigin: config.suiRpcOrigin ? new URL(config.suiRpcOrigin).toString() : undefined
   };
@@ -360,7 +359,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
         getSessionStorage().setItem(ephemeralStorageKey, JSON.stringify(ephemeral));
 
         const response = await requestJson(
-          new URL("/v1/auth/login-requests", config.apiOrigin),
+          new URL("/v1/auth/login-requests", CELERIS_BROWSER_SDK_API_ORIGIN),
           {
             method: "POST",
             body: JSON.stringify({
@@ -396,7 +395,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
         }
 
         const response = await requestJson(
-          new URL("/v1/auth/token", config.apiOrigin),
+          new URL("/v1/auth/token", CELERIS_BROWSER_SDK_API_ORIGIN),
           {
             method: "POST",
             body: JSON.stringify({
@@ -416,7 +415,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
         if (!parsed) {
           return null;
         }
-        const response = await fetch(new URL("/v1/me", config.apiOrigin), {
+        const response = await fetch(new URL("/v1/me", CELERIS_BROWSER_SDK_API_ORIGIN), {
           headers: {
             authorization: `Bearer ${parsed.token}`
           }
@@ -449,7 +448,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
         const parsed = readStoredSession();
 
         if (parsed) {
-          await fetch(new URL("/v1/auth/logout", config.apiOrigin), {
+          await fetch(new URL("/v1/auth/logout", CELERIS_BROWSER_SDK_API_ORIGIN), {
             method: "POST",
             headers: {
               authorization: `Bearer ${parsed.token}`
@@ -464,7 +463,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
     apps: {
       getCatalog: async (): Promise<AppCatalog> => {
         const response = await requestJson(
-          new URL(`/v1/apps/${config.appId}/catalog`, config.apiOrigin),
+          new URL(`/v1/apps/${config.appId}/catalog`, CELERIS_BROWSER_SDK_API_ORIGIN),
           {
             method: "GET"
           },
@@ -476,7 +475,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
     credits: {
       getBalance: async (): Promise<AppBalance> => {
         const response = await requestAuthenticatedJson(
-          new URL(`/v1/apps/${config.appId}/balance`, config.apiOrigin),
+          new URL(`/v1/apps/${config.appId}/balance`, CELERIS_BROWSER_SDK_API_ORIGIN),
           {
             method: "GET"
           },
@@ -486,7 +485,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
       },
       startCheckout: async (options: StartCheckoutOptions): Promise<CheckoutSession> => {
         const response = await requestAuthenticatedJson(
-          new URL(`/v1/apps/${config.appId}/checkout-sessions`, config.apiOrigin),
+          new URL(`/v1/apps/${config.appId}/checkout-sessions`, CELERIS_BROWSER_SDK_API_ORIGIN),
           {
             method: "POST",
             body: JSON.stringify({
@@ -506,7 +505,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
       },
       completeCheckout: async (checkoutSessionId: string): Promise<{ checkoutSession: CheckoutSession; balance: AppBalance }> => {
         return requestAuthenticatedJson(
-          new URL(`/v1/apps/${config.appId}/checkout-sessions/${checkoutSessionId}/complete`, config.apiOrigin),
+          new URL(`/v1/apps/${config.appId}/checkout-sessions/${checkoutSessionId}/complete`, CELERIS_BROWSER_SDK_API_ORIGIN),
           {
             method: "POST"
           },
@@ -526,7 +525,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
         const transactionKind = input.transaction.getData();
         const transactionKindBytes = await serializeTransactionKindBytes(input.transaction, config.suiRpcOrigin);
         const execution = await requestAuthenticatedJson(
-          new URL(`/v1/apps/${config.appId}/actions/${encodeURIComponent(input.actionType)}/execute`, config.apiOrigin),
+          new URL(`/v1/apps/${config.appId}/actions/${encodeURIComponent(input.actionType)}/execute`, CELERIS_BROWSER_SDK_API_ORIGIN),
           {
             method: "POST",
             body: JSON.stringify({
@@ -546,7 +545,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
             execution.sponsorship.sponsorSignature
           );
           const completion = await requestAuthenticatedJson(
-            new URL(`/v1/apps/${config.appId}/actions/${encodeURIComponent(input.actionType)}/complete`, config.apiOrigin),
+            new URL(`/v1/apps/${config.appId}/actions/${encodeURIComponent(input.actionType)}/complete`, CELERIS_BROWSER_SDK_API_ORIGIN),
             {
               method: "POST",
               body: JSON.stringify({
@@ -568,7 +567,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
           };
         } catch (error) {
           await requestAuthenticatedJson(
-            new URL(`/v1/apps/${config.appId}/actions/${encodeURIComponent(input.actionType)}/complete`, config.apiOrigin),
+            new URL(`/v1/apps/${config.appId}/actions/${encodeURIComponent(input.actionType)}/complete`, CELERIS_BROWSER_SDK_API_ORIGIN),
             {
               method: "POST",
               body: JSON.stringify({
@@ -620,7 +619,7 @@ export function createCelerisBrowserClient(config: CelerisBrowserClientConfig) {
     transactions: {
       list: async (): Promise<AppTransactionRecord[]> => {
         const response = await requestJson(
-          new URL(`/v1/apps/${config.appId}/transactions`, config.apiOrigin),
+          new URL(`/v1/apps/${config.appId}/transactions`, CELERIS_BROWSER_SDK_API_ORIGIN),
           {
             method: "GET"
           },

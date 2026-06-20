@@ -4,14 +4,12 @@ import { useEffect, useState } from "react";
 import { authLoginRequestResponseSchema } from "@celeris/shared";
 import { getWebRuntimeConfig } from "../env";
 import { buttonVariants } from "./ui/button";
-import { Card } from "./ui/card";
 
 export function HostedSignIn() {
   const config = getWebRuntimeConfig();
   const [loginRequestId, setLoginRequestId] = useState<string>("");
   const [clientName, setClientName] = useState("Celeris");
   const [googleStartUrl, setGoogleStartUrl] = useState<string>("");
-  const [statusMessage, setStatusMessage] = useState("Load or create a login request to continue.");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
 
@@ -39,7 +37,6 @@ export function HostedSignIn() {
       setGoogleStartUrl(
         new URL(`/v1/auth/google/start?loginRequestId=${payload.loginRequest.loginRequestId}`, config.NEXT_PUBLIC_API_ORIGIN).toString()
       );
-      setStatusMessage("Login request ready.");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to load login request");
     } finally {
@@ -72,7 +69,6 @@ export function HostedSignIn() {
       setGoogleStartUrl(
         new URL(`/v1/auth/google/start?loginRequestId=${payload.loginRequest.loginRequestId}`, config.NEXT_PUBLIC_API_ORIGIN).toString()
       );
-      setStatusMessage("Login request ready.");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to create login request");
     } finally {
@@ -81,20 +77,33 @@ export function HostedSignIn() {
   }
 
   return (
-    <main className="shell">
-      <Card className="hero">
-        <p className="eyebrow">POWERED BY CELERIS</p>
-        <h1>Sign in to {clientName}</h1>
-        <p className="lede">
-          You are about to have a smooth blockchain experience.
-        </p>
+    <main className="grid min-h-screen place-items-center bg-[#fbfbfa] px-4 py-8 sm:px-6">
+      <section className="w-full rounded-lg border border-[rgba(23,34,31,0.12)] bg-white p-5 shadow-[0_18px_44px_rgba(23,34,31,0.08)] md:w-1/2 md:p-7">
+        <div className="grid gap-7">
+          <div className="grid gap-3">
+            <p className="m-0 text-xs font-semibold uppercase text-[#55635d]">Celeris Auth</p>
+            <h1 className="m-0 text-2xl font-semibold leading-tight text-[#17221f] sm:text-3xl">
+              Sign in to {clientName}
+            </h1>
+            <p className="m-0 max-w-[34rem] text-sm leading-6 text-[#55635d]">
+              Continue with your Google account to create a secure zkLogin session.
+            </p>
+          </div>
 
-        <h2>Choose how you want to Sign-in.</h2>
-        <a className={buttonVariants({ className: isBusy || !loginRequestId ? "disabled" : undefined })} href={googleStartUrl || "#"}>
-          Continue with Google
-        </a>
+          <a
+            aria-disabled={isBusy || !loginRequestId}
+            className={buttonVariants({
+              className: `w-full min-h-11 border-[#cc6d2c] bg-[#cc6d2c] text-white hover:bg-[#b85f25] ${
+                isBusy || !loginRequestId ? "disabled" : ""
+              }`
+            })}
+            href={googleStartUrl || "#"}
+          >
+            Continue with Google
+          </a>
+        </div>
         {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
-      </Card>
+      </section>
     </main>
   );
 }

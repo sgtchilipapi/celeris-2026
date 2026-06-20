@@ -275,6 +275,11 @@ export interface UpdateAppCreditsPricingInput {
   creditsPerUsd: number;
 }
 
+export interface UpdateAppAllowedOriginsInput {
+  appId: string;
+  allowedOrigins: string[];
+}
+
 export interface CreateCheckoutSessionRecordInput {
   appId: string;
   walletAddress: string;
@@ -377,6 +382,7 @@ export interface DeveloperSetupRepository {
   findRegisteredProgramByAppId(appId: string): Promise<RegisteredProgramRecord | null>;
   upsertManagedAction(input: UpsertManagedActionInput): Promise<ManagedActionRecord>;
   listManagedActions(appId: string): Promise<ManagedActionRecord[]>;
+  updateAppAllowedOrigins(input: UpdateAppAllowedOriginsInput): Promise<DeveloperAppAggregateRecord | null>;
   updateAppCreditsPricing(input: UpdateAppCreditsPricingInput): Promise<DeveloperAppAggregateRecord | null>;
   createCheckoutSession(input: CreateCheckoutSessionRecordInput): Promise<CheckoutSessionRecord>;
   findCheckoutSessionById(appId: string, checkoutSessionId: string): Promise<CheckoutSessionRecord | null>;
@@ -739,6 +745,17 @@ export function createPrismaDeveloperSetupRepository(prisma = getPrismaClient())
         where: { appId },
         orderBy: { actionType: "asc" }
       });
+    },
+    async updateAppAllowedOrigins(input) {
+      const record = await prisma.app.update({
+        where: { id: input.appId },
+        data: {
+          allowedOrigins: input.allowedOrigins
+        },
+        include: appInclude
+      });
+
+      return fromPrismaAppAggregate(record);
     },
     async updateAppCreditsPricing(input) {
       const record = await prisma.app.update({
@@ -1396,6 +1413,22 @@ export function createInMemoryDeveloperSetupRepository(): DeveloperSetupReposito
       return Array.from(actionsByAppId.get(appId)?.values() ?? []).sort((left, right) =>
         left.actionType.localeCompare(right.actionType)
       );
+    },
+    async updateAppAllowedOrigins(input) {
+      const existing = apps.get(input.appId);
+
+      if (!existing) {
+        return null;
+      }
+
+      const updated: AppRecord = {
+        ...existing,
+        allowedOrigins: input.allowedOrigins,
+        updatedAt: new Date()
+      };
+
+      apps.set(input.appId, updated);
+      return getAggregate(updated);
     },
     async updateAppCreditsPricing(input) {
       const existing = apps.get(input.appId);

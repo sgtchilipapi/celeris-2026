@@ -64,15 +64,13 @@ describe("Celeris browser SDK auth", () => {
 
     const client = createCelerisBrowserClient({
       appId: "app_123",
-      apiOrigin: "http://localhost:4100",
-      hostedAuthOrigin: "http://localhost:3101",
       redirectUri: "http://localhost:3103/auth/callback"
     });
     const loginRequest = await client.auth.startLogin({ redirect: false });
 
     expect(loginRequest.loginRequestId).toBe("login_123");
     expect(fetchMock).toHaveBeenCalledWith(
-      new URL("/v1/auth/login-requests", "http://localhost:4100"),
+      new URL("/v1/auth/login-requests", "https://api.celeris.pro"),
       expect.objectContaining({
         method: "POST",
         body: expect.any(String)
@@ -131,8 +129,6 @@ describe("Celeris browser SDK auth", () => {
 
     const client = createCelerisBrowserClient({
       appId: "app_123",
-      apiOrigin: "http://localhost:4100",
-      hostedAuthOrigin: "http://localhost:3101",
       redirectUri: "http://localhost:3103/auth/callback",
       suiRpcOrigin: "https://fullnode.testnet.sui.io:443"
     });
@@ -171,8 +167,6 @@ describe("Celeris browser SDK auth", () => {
 
     const client = createCelerisBrowserClient({
       appId: "app_123",
-      apiOrigin: "http://localhost:4100",
-      hostedAuthOrigin: "http://localhost:3101",
       redirectUri: "http://localhost:3103/auth/callback"
     });
 
@@ -187,7 +181,7 @@ describe("Celeris browser SDK auth", () => {
 
     expect(refreshed?.token).toBe("token-refreshed");
     expect(fetchMock).toHaveBeenLastCalledWith(
-      new URL("/v1/me", "http://localhost:4100"),
+      new URL("/v1/me", "https://api.celeris.pro"),
       expect.objectContaining({
         headers: {
           authorization: "Bearer token-123"
@@ -203,8 +197,6 @@ describe("Celeris browser SDK auth", () => {
 
     const client = createCelerisBrowserClient({
       appId: "app_123",
-      apiOrigin: "http://localhost:4100",
-      hostedAuthOrigin: "http://localhost:3101",
       redirectUri: "http://localhost:3103/auth/callback"
     });
 
@@ -309,8 +301,6 @@ describe("Celeris browser SDK auth", () => {
 
     const client = createCelerisBrowserClient({
       appId: "app_123",
-      apiOrigin: "http://localhost:4100",
-      hostedAuthOrigin: "http://localhost:3101",
       redirectUri: "http://localhost:3103/auth/callback"
     });
 
@@ -331,7 +321,7 @@ describe("Celeris browser SDK auth", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      new URL("/v1/apps/app_123/balance", "http://localhost:4100"),
+      new URL("/v1/apps/app_123/balance", "https://api.celeris.pro"),
       expect.objectContaining({
         headers: expect.objectContaining({
           authorization: "Bearer token-123"
@@ -387,8 +377,6 @@ describe("Celeris browser SDK auth", () => {
 
     const client = createCelerisBrowserClient({
       appId: "app_123",
-      apiOrigin: "http://localhost:4100",
-      hostedAuthOrigin: "http://localhost:3101",
       redirectUri: "http://localhost:3103/auth/callback"
     });
 
@@ -498,8 +486,6 @@ describe("Celeris browser SDK auth", () => {
 
     const client = createCelerisBrowserClient({
       appId: "app_123",
-      apiOrigin: "http://localhost:4100",
-      hostedAuthOrigin: "http://localhost:3101",
       redirectUri: "http://localhost:3103/auth/callback"
     });
 
@@ -538,15 +524,11 @@ describe("Celeris browser SDK auth", () => {
 
     const client = createCelerisBrowserClient({
       appId: " app_123 ",
-      apiOrigin: "http://localhost:4100/path",
-      hostedAuthOrigin: "http://localhost:3101/sign-in",
       redirectUri: "http://localhost:3103/auth/callback"
     });
 
     expect(client.config).toMatchObject({
       appId: "app_123",
-      apiOrigin: "http://localhost:4100",
-      hostedAuthOrigin: "http://localhost:3101",
       redirectUri: "http://localhost:3103/auth/callback"
     });
     await expect(client.auth.getSession()).resolves.toBeNull();
@@ -598,8 +580,6 @@ describe("Celeris browser SDK auth", () => {
 
     const client = createCelerisBrowserClient({
       appId: "app_123",
-      apiOrigin: "http://localhost:4100",
-      hostedAuthOrigin: "http://localhost:3101",
       redirectUri: "http://localhost:3103/auth/callback"
     });
 
