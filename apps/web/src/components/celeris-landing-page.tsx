@@ -1,8 +1,10 @@
 const socialLinks = [
-  { href: "#", label: "GitHub" },
-  { href: "#", label: "X" },
-  { href: "#", label: "LinkedIn" }
+  { href: "https://github.com/sgtchilipapi/celeris-2026", label: "GitHub" },
+  { href: "https://x.com/sgtchilipapi", label: "X" }
 ];
+
+const contactHref = "https://x.com/CelerisPro";
+const demoHref = "https://demo.celeris.pro";
 
 export function CelerisLandingPage() {
   return (
@@ -11,7 +13,7 @@ export function CelerisLandingPage() {
         <a className="landing-brand" href="/">
           Celeris
         </a>
-        <a className="landing-text-link" href="mailto:hello@celeris.pro">
+        <a className="landing-text-link" href={contactHref}>
           Contact
         </a>
       </header>
@@ -23,9 +25,14 @@ export function CelerisLandingPage() {
           Let users perform sponsored onchain actions through credits, without wallet setup, gas funding, or crypto
           onboarding.
         </p>
-        <a className="landing-button" href="mailto:hello@celeris.pro">
-          Contact me
-        </a>
+        <div className="landing-actions">
+          <a className="landing-button" href={demoHref}>
+            Try the demo
+          </a>
+          <a className="landing-button landing-button-secondary" href={contactHref}>
+            Contact me
+          </a>
+        </div>
       </section>
 
       <section className="landing-section" aria-labelledby="problem-title">
@@ -49,7 +56,7 @@ export function CelerisLandingPage() {
 
       <section className="landing-final" aria-labelledby="final-title">
         <h2 id="final-title">Building a Sui app that should not feel like crypto?</h2>
-        <a className="landing-button" href="mailto:hello@celeris.pro">
+        <a className="landing-button" href={contactHref}>
           Contact me
         </a>
       </section>

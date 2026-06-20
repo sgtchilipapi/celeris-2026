@@ -96,6 +96,12 @@ a {
   line-height: 1.55;
 }
 
+.landing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
 .landing-button {
   display: inline-flex;
   align-items: center;
@@ -116,6 +122,17 @@ a {
 .landing-button:focus-visible {
   background: #fff;
   color: #111;
+}
+
+.landing-button-secondary {
+  background: #fff;
+  color: #111;
+}
+
+.landing-button-secondary:hover,
+.landing-button-secondary:focus-visible {
+  background: #111;
+  color: #fff;
 }
 
 .landing-section,
