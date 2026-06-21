@@ -36,6 +36,10 @@ function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Request failed";
 }
 
+function formatTransactionGreeting(transaction: AppTransactionRecord) {
+  return transaction.username ? `${transaction.username} said Hello!` : "Someone said Hello!";
+}
+
 export function DemoConsumerShell({ appId, demoOrigin, suiRpcOrigin = DEMO_SUI_RPC_ORIGIN }: DemoConsumerShellProps) {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [catalog, setCatalog] = useState<AppCatalog | null>(null);
@@ -184,7 +188,7 @@ export function DemoConsumerShell({ appId, demoOrigin, suiRpcOrigin = DEMO_SUI_R
       <Card className="workspace-header demo-hero">
         <div>
           <p className="workspace-kicker">DEMO APP USING CELERIS BROWSER-SDK</p>
-          <h1>Hello Celeris!</h1>
+          <h1>Hello Friend!</h1>
           <p className="workspace-copy">Sign in, buy a few credits, and send one bright hello.</p>
         </div>
       </Card>
@@ -285,7 +289,7 @@ export function DemoConsumerShell({ appId, demoOrigin, suiRpcOrigin = DEMO_SUI_R
               />
             </Label>
             <Button disabled={isBusy || !session || !sayHelloAction || !HELLO_CELERIS_APP_STATE_OBJECT_ID.trim()} type="submit">
-              Say Hello Celeris
+              Say Hello!
             </Button>
           </form>
         </Card>
@@ -300,17 +304,15 @@ export function DemoConsumerShell({ appId, demoOrigin, suiRpcOrigin = DEMO_SUI_R
           <div className="list-stack">
             {transactions.length > 0 ? (
               transactions.map((transaction) => (
-                <a
+                <div
                   className="list-row"
-                  href={toSuiScanTestnetTxUrl(transaction.digest)}
                   key={transaction.transactionId}
-                  rel="noreferrer"
-                  target="_blank"
                 >
-                  <strong>{transaction.message ?? transaction.actionType}</strong>
-                  <small>{transaction.digest}</small>
-                  <small>{transaction.walletAddress}</small>
-                </a>
+                  <strong>{formatTransactionGreeting(transaction)}</strong>
+                  <a href={toSuiScanTestnetTxUrl(transaction.digest)} rel="noreferrer" target="_blank">
+                    click to view transaction
+                  </a>
+                </div>
               ))
             ) : (
               <p className="empty-state">No transactions recorded yet.</p>

@@ -584,13 +584,13 @@ export function DeveloperSetupConsole({
   }
 
   return (
-    <main className="mx-auto grid max-w-7xl gap-4 px-5 py-5 md:gap-5 md:px-6">
+    <main className="developer-console mx-auto grid max-w-7xl gap-4 px-5 py-5 md:gap-5 md:px-6">
       <Card className="workspace-header">
         <div className="workspace-header-copy">
           <p className="workspace-kicker">CELERIS</p>
           <h1>Developer Console</h1>
           <p className="workspace-copy">
-            This is the place to get your amazing app provide the smoothest user experience.
+            Configure metered actions, sponsor wallets, and runtime settings for a calmer onchain user experience.
           </p>
         </div>
         <div className="profile-menu">

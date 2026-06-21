@@ -77,23 +77,24 @@ export function HostedSignIn() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[#fbfbfa] px-4 py-8 sm:px-6">
-      <section className="w-full rounded-lg border border-[rgba(23,34,31,0.12)] bg-white p-5 shadow-[0_18px_44px_rgba(23,34,31,0.08)] md:w-1/2 md:p-7">
+    <main className="auth-page">
+      <section className="auth-card">
+        <div className="auth-orbit" aria-hidden="true" />
         <div className="grid gap-7">
           <div className="grid gap-3">
-            <p className="m-0 text-xs font-semibold uppercase text-[#55635d]">Celeris Auth</p>
-            <h1 className="m-0 text-2xl font-semibold leading-tight text-[#17221f] sm:text-3xl">
+            <p className="auth-kicker">Celeris Auth</p>
+            <h1 className="m-0 text-2xl font-semibold leading-tight sm:text-3xl">
               Sign in to {clientName}
             </h1>
-            <p className="m-0 max-w-[34rem] text-sm leading-6 text-[#55635d]">
-              Continue with your Google account to create a secure zkLogin session.
+            <p className="auth-copy">
+              Continue with Google to create a secure zkLogin session for this Celeris surface.
             </p>
           </div>
 
           <a
             aria-disabled={isBusy || !loginRequestId}
             className={buttonVariants({
-              className: `w-full min-h-11 border-[#cc6d2c] bg-[#cc6d2c] text-white hover:bg-[#b85f25] ${
+              className: `auth-google-button w-full ${
                 isBusy || !loginRequestId ? "disabled" : ""
               }`
             })}

@@ -137,7 +137,11 @@ describe("DemoConsumerShell", () => {
     });
 
     expect(screen.getByText("100 credits")).toBeInTheDocument();
-    const transactionLink = screen.getByRole("link", { name: /Ada says Hello Celeris!/u });
+    expect(screen.getByText("Ada said Hello!")).toBeInTheDocument();
+    expect(screen.queryByText(transactionDigest)).not.toBeInTheDocument();
+    expect(screen.queryByText("tx_123")).not.toBeInTheDocument();
+
+    const transactionLink = screen.getByRole("link", { name: "click to view transaction" });
     expect(transactionLink).toHaveAttribute("href", `https://suiscan.xyz/testnet/tx/${transactionDigest}`);
     expect(transactionLink).toHaveAttribute("target", "_blank");
 
