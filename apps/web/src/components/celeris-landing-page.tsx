@@ -43,18 +43,14 @@ export function CelerisLandingPage() {
       <section className="landing-section" aria-labelledby="problem-title">
         <h2 id="problem-title">The problem</h2>
         <div className="landing-copy">
-          <p>Blockchain apps lose users before they reach the product.</p>
-          <p>Wallet setup. Gas funding. Transaction confusion.</p>
-          <p>That friction should not be the first user experience.</p>
+          <p>Sui apps still ask users to set up wallets, fund gas, and understand transactions before using the product.</p>
         </div>
       </section>
 
       <section className="landing-section" aria-labelledby="solution-title">
         <h2 id="solution-title">Celeris</h2>
         <div className="landing-copy">
-          <p>Celeris lets dApps offer credit-based onchain actions.</p>
-          <p>Users log in, spend credits, and trigger approved transactions.</p>
-          <p>The dApp controls the action. Celeris handles sponsorship.</p>
+          <p>Celeris lets users log in, buy credits, and run approved sponsored Sui actions while the dApp stays in control.</p>
         </div>
       </section>
 
