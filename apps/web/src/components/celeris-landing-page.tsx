@@ -5,6 +5,7 @@ const socialLinks = [
 
 const contactHref = "https://x.com/CelerisPro";
 const demoHref = "https://demo.celeris.pro";
+const appHref = "https://app.celeris.pro";
 
 export function CelerisLandingPage() {
   return (
@@ -77,9 +78,14 @@ export function CelerisLandingPage() {
 
       <section className="landing-final" aria-labelledby="final-title">
         <h2 id="final-title">Building a Sui app that should not feel like crypto?</h2>
-        <a className="landing-button" href={contactHref}>
-          Contact me
-        </a>
+        <div className="landing-actions">
+          <a className="landing-button" href={appHref}>
+            Start Building
+          </a>
+          <a className="landing-quiet-link" href={contactHref}>
+            Contact me
+          </a>
+        </div>
       </section>
 
       <footer className="landing-footer">
