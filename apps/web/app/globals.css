@@ -1039,6 +1039,7 @@ a {
   max-width: 11ch;
   font-size: clamp(3.4rem, 17vw, 5.7rem);
   line-height: 0.9;
+  text-shadow: 0 0 1px rgba(82, 91, 86, 0.7);
 }
 
 .demo-workspace .workspace-copy {
@@ -1378,6 +1379,10 @@ a {
 .demo-workspace .list-row strong {
   color: #17301e;
   font-size: 1rem;
+}
+
+.demo-workspace .list-row a {
+  color: #3d4a43;
 }
 
 .demo-workspace .empty-state {
