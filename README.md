@@ -31,14 +31,13 @@ This is a sample of how a consumer app would use Celeris:
 import { Transaction } from "@mysten/sui/transactions";
 import { useCelerisBrowserClient } from "@celeris/sdk-browser/react";
 
-// Set the celeris APP_ID reference generated from the Celeris Developer Dashboard
-const APP_ID="..."
+// Set the sui package_id and state_object
 const PACKAGE_ID = "0x...";
 const APP_STATE_OBJECT_ID = "0x...";
 
 // Instantiate the celeris client
 const client = useCelerisBrowserClient({
-    appId: process.env.NEXT_PUBLIC_CELERIS_APP_ID!,
+    appId: process.env.NEXT_PUBLIC_CELERIS_APP_ID!, //The APP_ID generated from the Celeris Developer Dashboard
     redirectUri: `${process.env.NEXT_PUBLIC_APP_ORIGIN}/auth/callback`,
     suiRpcOrigin: "https://fullnode.testnet.sui.io:443"
 });
@@ -70,9 +69,6 @@ const result = await client.actions.execute({
 });
 
 ```
-
-For an auth callback route, call `client.auth.handleRedirectCallback(window.location.href)` and then redirect the user back to your app page.
-
 Celeris action execution has three responsibilities:
 
 - Your app registers an action type and credit price in Celeris.
