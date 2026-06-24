@@ -87,7 +87,7 @@ After reading the docs, before implementation starts, the agent should respond w
 - Delivery model:
   - vertical slice
 - Current sequence:
-  - `FS-00`, `FS-01`, `FS-01.1`, `FS-02`, `FS-02.1`, `FS-03`, `FS-04`, `FS-04.1`, `FS-04.2`, `FS-05`
+  - `FS-00`, `FS-01`, `FS-01.1`, `FS-02`, `FS-02.1`, `FS-03`, `FS-04`, `FS-04.1`, `FS-04.2`, `FS-05`, `FS-06`
 - Active work order:
   - `FS-XX` if provided, otherwise "not assigned yet"
 - Dependency check:

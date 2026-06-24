@@ -905,11 +905,134 @@ Turn the reference implementation into a clean developer-integration demo, lock 
 - The manual operator path is documented in [MVP_WALKTHROUGH.md](./MVP_WALKTHROUGH.md).
 - A developer-owned Next.js consumer example is documented in [../examples/nextjs-sdk-consumer.md](../examples/nextjs-sdk-consumer.md).
 
+## `FS-06` Credit Ledger And Reservation Hardening
+
+### Objective
+
+Harden the existing append-only credit ledger into a production-grade reservation system that cannot overspend under concurrent action requests and that makes credit-accounting invariants explicit at the database and repository boundaries.
+
+The current implementation already has the correct conceptual shape: balances are derived from `CreditLedgerEntry`, purchases append positive ledger entries, action execution appends negative reserve entries before sponsorship, failed actions append release entries, and successful actions append a zero-delta capture audit marker. This work order closes the remaining accounting safety gaps before the MVP is treated as money-like credit infrastructure.
+
+### In Scope
+
+- concurrency-safe credit reservation
+- a derived per-app/per-wallet balance row used for locking and fast balance reads
+- migration/backfill from the existing ledger into the balance table
+- atomic reserve, release, capture, purchase, and reconciliation updates
+- ledger immutability protections at the database and repository layers
+- stricter reservation and ledger reason state machines
+- idempotency guarantees for purchase completion, reservation release, and reservation capture
+- tests that reproduce concurrent overspend attempts
+- operational repair/check tooling for ledger-vs-balance drift
+
+### Out Of Scope
+
+- replacing the append-only ledger as the source of truth
+- changing credit pricing or checkout product design
+- introducing real payment provider settlement
+- adding a general double-entry accounting product ledger
+- changing the public browser SDK action API
+- changing the Sui sponsorship policy language beyond what prior work orders require
+
+### Data Model
+
+- Add `CreditBalance` as a derived locking/projection table:
+  - `appId`
+  - `walletAddress`
+  - `chainId`
+  - `availableCredits`
+  - `reservedCredits`
+  - `createdAt`
+  - `updatedAt`
+  - unique `(appId, walletAddress)`
+- Keep `CreditLedgerEntry` as the append-only source of truth for audit and reconstruction.
+- Tighten `CreditLedgerEntry` fields with enums or database check constraints for:
+  - `reason`: `purchase`, `reserve`, `release`, `capture`, and any explicit future adjustment reason
+  - `referenceType`: `checkout_session`, `action_reservation`, and any explicit future administrative reference type
+- Tighten `PendingActionReservation.status` with an enum or check constraint for allowed transitions:
+  - `reserved` -> `released`
+  - `reserved` -> `captured`
+  - no terminal-state mutation except idempotent replays that return the existing terminal result
+
+### Implementation Checklist
+
+- Add the `CreditBalance` Prisma model and migration.
+- Backfill `CreditBalance.availableCredits` from the sum of existing ledger entries grouped by `(appId, walletAddress, chainId)`.
+- Initialize or upsert the balance row whenever a purchase ledger entry is created.
+- Refactor `getCreditBalance()` to read from `CreditBalance.availableCredits` while keeping a repository/test helper that can independently recompute balance from ledger entries.
+- Refactor reservation creation so it locks exactly one `(appId, walletAddress)` balance row before checking and decrementing available credits.
+- Use a database transaction with either:
+  - explicit row-level locking on `CreditBalance`, or
+  - serializable isolation plus retry handling for serialization failures.
+- In the same transaction as reservation creation:
+  - verify `availableCredits >= creditsReserved`
+  - decrement `availableCredits`
+  - increment `reservedCredits`
+  - create the `PendingActionReservation`
+  - append the negative `reserve` ledger entry
+- Refactor release so it is idempotent and, in one locked transaction:
+  - moves the reservation from `reserved` to `released`
+  - releases sponsor gas locks
+  - increments `availableCredits`
+  - decrements `reservedCredits`
+  - appends exactly one positive `release` ledger entry
+- Refactor capture so it is idempotent and, in one locked transaction:
+  - moves the reservation from `reserved` to `captured`
+  - marks sponsor gas locks spent
+  - decrements `reservedCredits`
+  - appends exactly one zero-delta `capture` ledger audit entry
+  - creates or updates the transaction record
+- Ensure terminal reservations cannot be released after capture or captured after release except as a safe idempotent replay of the same terminal event.
+- Add database-level protections for `CreditLedgerEntry` immutability, using migration-managed triggers/rules or equivalent Postgres protections that reject update and delete attempts.
+- Replace ad hoc string literals for ledger reasons, reference types, and reservation statuses with shared constants or enums used by repository code and tests.
+- Add a maintenance command or script that compares `CreditBalance` rows against recomputed ledger sums and reports drift.
+- Add structured audit logs for purchase, reserve, release, capture, idempotent replay, and drift-detection events.
+
+### Deliverables
+
+- `CreditBalance` projection table with migration and backfill
+- row-locked or serializable reservation path that cannot overspend
+- release and capture paths that keep `availableCredits` and `reservedCredits` consistent
+- immutable ledger enforcement
+- explicit reservation/ledger state constants or enums
+- drift-detection maintenance script
+- concurrency and idempotency regression coverage
+
+### Acceptance Criteria
+
+- two concurrent reservations against the same app wallet cannot both spend the same available credits
+- the losing concurrent reservation returns the same insufficient-credit behavior as a normal underfunded request
+- balance reads are served from `CreditBalance` and match ledger recomputation after purchases, reserves, releases, and captures
+- purchase completion remains idempotent and cannot double-credit a wallet
+- release remains idempotent and cannot double-refund a wallet
+- capture remains idempotent and cannot double-spend or double-record a transaction
+- a captured reservation cannot later be released for credit
+- a released reservation cannot later be captured as a successful spend
+- direct database updates or deletes against `CreditLedgerEntry` fail in normal application migrations/tests
+- ledger reason, reference type, and reservation status values are constrained to known states
+- the drift-detection script exits non-zero when a deliberately corrupted balance projection is introduced in tests
+- `npm run typecheck` passes
+- `npm test` passes
+
+### Verification
+
+- API or repository integration test with parallel reservation attempts proving no overspend
+- repository tests for purchase, reserve, release, capture, and terminal-state idempotency
+- migration test or database integration test proving `CreditLedgerEntry` update/delete attempts are rejected
+- test proving `CreditBalance` backfill matches historical `CreditLedgerEntry` sums
+- drift-detection script test for matching state and intentionally corrupted state
+- full credit execution regression through generic sponsored action execute/complete
+
+### Status Note
+
+- This work order is intentionally sequenced after `FS-04.2` and `FS-05` because it hardens the credit accounting substrate without changing the public SDK or demo flow.
+- Until this work order is complete, the credit ledger should be described as append-only in application behavior but not yet as a fully hardened concurrent reservation system.
+
 ## Global Definition Of Done
 
 The full fresh-start implementation is complete only when:
 
-- all nine work orders are complete, including `FS-04.1` and `FS-04.2`
+- all ten work orders are complete, including `FS-04.1`, `FS-04.2`, and `FS-06`
 - a brand new app can be created in Celeris
 - the developer dashboard lives on the app origin while the reference consumer app lives on the demo origin
 - the developer dashboard signs in through shared auth as a reserved first-party client identity
